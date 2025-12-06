@@ -35,3 +35,4 @@ generate-example.py
 *.mdc
 *.pdf
 .cursor/worktrees.json
+uploads/

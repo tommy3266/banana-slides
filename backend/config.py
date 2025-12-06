@@ -39,10 +39,18 @@ class Config:
     UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, 'uploads')
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    ALLOWED_REFERENCE_FILE_EXTENSIONS = {'pdf', 'docx', 'pptx', 'doc', 'ppt', 'xlsx', 'xls', 'csv', 'txt', 'md'}
     
     # AI服务配置
     GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
     GOOGLE_API_BASE = os.getenv('GOOGLE_API_BASE', '')
+    
+    # MinerU 文件解析服务配置
+    MINERU_TOKEN = os.getenv('MINERU_TOKEN', '')
+    MINERU_API_BASE = os.getenv('MINERU_API_BASE', 'https://mineru.net')
+    
+    # 图片识别模型配置
+    IMAGE_CAPTION_MODEL = os.getenv('IMAGE_CAPTION_MODEL', 'gemini-2.5-flash')
     
     # 并发配置
     MAX_DESCRIPTION_WORKERS = int(os.getenv('MAX_DESCRIPTION_WORKERS', '5'))

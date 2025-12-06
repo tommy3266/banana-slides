@@ -3,7 +3,7 @@ Project Controller - handles project-related endpoints
 """
 import logging
 from flask import Blueprint, request, jsonify
-from models import db, Project, Page, Task
+from models import db, Project, Page, Task, ReferenceFile
 from utils import success_response, error_response, not_found, bad_request
 from services import AIService
 from services.task_manager import task_manager, generate_descriptions_task, generate_images_task
@@ -14,6 +14,32 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 project_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
+
+
+def _get_project_reference_files_content(project_id: str) -> list:
+    """
+    Get reference files content for a project
+    
+    Args:
+        project_id: Project ID
+        
+    Returns:
+        List of dicts with 'filename' and 'content' keys
+    """
+    reference_files = ReferenceFile.query.filter_by(
+        project_id=project_id,
+        parse_status='completed'
+    ).all()
+    
+    files_content = []
+    for ref_file in reference_files:
+        if ref_file.markdown_content:
+            files_content.append({
+                'filename': ref_file.filename,
+                'content': ref_file.markdown_content
+            })
+    
+    return files_content
 
 
 @project_bp.route('', methods=['GET'])
@@ -209,6 +235,15 @@ def generate_outline(project_id):
             current_app.config['GOOGLE_API_BASE']
         )
         
+        # Get reference files content
+        reference_files_content = _get_project_reference_files_content(project_id)
+        if reference_files_content:
+            logger.info(f"Found {len(reference_files_content)} reference files for project {project_id}")
+            for rf in reference_files_content:
+                logger.info(f"  - {rf['filename']}: {len(rf['content'])} characters")
+        else:
+            logger.info(f"No reference files found for project {project_id}")
+        
         # 根据项目类型选择不同的处理方式
         if project.creation_type == 'outline':
             # 从大纲生成：解析用户输入的大纲文本
@@ -216,7 +251,7 @@ def generate_outline(project_id):
                 return bad_request("outline_text is required for outline type project")
             
             # Parse outline text into structured format
-            outline = ai_service.parse_outline_text(project.outline_text)
+            outline = ai_service.parse_outline_text(project.outline_text, reference_files_content)
         elif project.creation_type == 'descriptions':
             # 从描述生成：这个类型应该使用专门的端点
             return bad_request("Use /generate/from-description endpoint for descriptions type")
@@ -229,7 +264,7 @@ def generate_outline(project_id):
                 return bad_request("idea_prompt is required")
             
             # Generate outline from idea
-            outline = ai_service.generate_outline(idea_prompt)
+            outline = ai_service.generate_outline(idea_prompt, reference_files_content)
             project.idea_prompt = idea_prompt
         
         # Flatten outline to pages
@@ -315,11 +350,14 @@ def generate_from_description(project_id):
             current_app.config['GOOGLE_API_BASE']
         )
         
+        # Get reference files content
+        reference_files_content = _get_project_reference_files_content(project_id)
+        
         logger.info(f"开始从描述生成大纲和页面描述: 项目 {project_id}")
         
         # Step 1: Parse description to outline
         logger.info("Step 1: 解析描述文本到大纲结构...")
-        outline = ai_service.parse_description_to_outline(description_text)
+        outline = ai_service.parse_description_to_outline(description_text, reference_files_content)
         logger.info(f"大纲解析完成，共 {len(ai_service.flatten_outline(outline))} 页")
         
         # Step 2: Split description into page descriptions
@@ -484,6 +522,9 @@ def generate_descriptions(project_id):
             current_app.config['GOOGLE_API_BASE']
         )
         
+        # Get reference files content
+        reference_files_content = _get_project_reference_files_content(project_id)
+        
         # Get app instance for background task
         app = current_app._get_current_object()
         
@@ -496,7 +537,8 @@ def generate_descriptions(project_id):
             project.idea_prompt,
             outline,
             max_workers,
-            app
+            app,
+            reference_files_content
         )
         
         # Update project status

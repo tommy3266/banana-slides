@@ -53,7 +53,8 @@ task_manager = TaskManager(max_workers=4)
 
 def generate_descriptions_task(task_id: str, project_id: str, ai_service, 
                                idea_prompt: str, outline: List[Dict], 
-                               max_workers: int = 5, app=None):
+                               max_workers: int = 5, app=None,
+                               reference_files_content: List[Dict[str, str]] = None):
     """
     Background task for generating page descriptions
     Based on demo.py gen_desc() with parallel processing
@@ -106,7 +107,7 @@ def generate_descriptions_task(task_id: str, project_id: str, ai_service,
                 with app.app_context():
                     try:
                         desc_text = ai_service.generate_page_description(
-                            idea_prompt, outline, page_outline, page_index
+                            idea_prompt, outline, page_outline, page_index, reference_files_content
                         )
                         
                         # Parse description into structured format

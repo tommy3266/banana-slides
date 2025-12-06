@@ -50,7 +50,7 @@ class AIService:
             text: Markdown 文本，可能包含 ![](url) 格式的图片
             
         Returns:
-            图片 URL 列表
+            图片 URL 列表（包括 http/https URL 和 /files/mineru/ 开头的本地路径）
         """
         if not text:
             return []
@@ -59,10 +59,30 @@ class AIService:
         pattern = r'!\[.*?\]\((.*?)\)'
         matches = re.findall(pattern, text)
         
-        # 过滤掉空字符串和无效 URL
-        urls = [url.strip() for url in matches if url.strip() and (url.startswith('http://') or url.startswith('https://'))]
+        # 过滤掉空字符串，支持 http/https URL 和 /files/mineru/ 开头的本地路径
+        urls = []
+        for url in matches:
+            url = url.strip()
+            if url and (url.startswith('http://') or url.startswith('https://') or url.startswith('/files/mineru/')):
+                urls.append(url)
         
         return urls
+    
+    @staticmethod
+    def _convert_mineru_path_to_local(mineru_path: str) -> Optional[str]:
+        """
+        将 /files/mineru/{extract_id}/{rel_path} 格式的路径转换为本地文件系统路径（支持前缀匹配）
+        
+        Args:
+            mineru_path: MinerU URL 路径，格式为 /files/mineru/{extract_id}/{rel_path}
+            
+        Returns:
+            本地文件系统路径，如果转换失败则返回 None
+        """
+        from utils.path_utils import find_mineru_file_with_prefix
+        
+        matched_path = find_mineru_file_with_prefix(mineru_path)
+        return str(matched_path) if matched_path else None
     
     @staticmethod
     def download_image_from_url(url: str) -> Optional[Image.Image]:
@@ -90,15 +110,26 @@ class AIService:
             logger.error(f"Failed to download image from {url}: {str(e)}")
             return None
     
-    def generate_outline(self, idea_prompt: str) -> List[Dict]:
+    def generate_outline(self, idea_prompt: str, reference_files_content: Optional[List[Dict[str, str]]] = None) -> List[Dict]:
         """
         Generate PPT outline from idea prompt
         Based on demo.py gen_outline()
         
+        Args:
+            idea_prompt: User's idea/request
+            reference_files_content: Optional list of reference file contents
+            
         Returns:
             List of outline items (may contain parts with pages or direct pages)
         """
-        outline_prompt = get_outline_generation_prompt(idea_prompt)
+        outline_prompt = get_outline_generation_prompt(idea_prompt, reference_files_content)
+        
+        # 临时打印完整 prompt（用于调试）
+        logger.debug("=" * 80)
+        logger.debug("FULL PROMPT FOR OUTLINE GENERATION:")
+        logger.debug("=" * 80)
+        logger.debug(outline_prompt)
+        logger.debug("=" * 80)
         
         response = self.client.models.generate_content(
             model=self.text_model,
@@ -112,18 +143,19 @@ class AIService:
         outline = json.loads(outline_text)
         return outline
     
-    def parse_outline_text(self, outline_text: str) -> List[Dict]:
+    def parse_outline_text(self, outline_text: str, reference_files_content: Optional[List[Dict[str, str]]] = None) -> List[Dict]:
         """
         Parse user-provided outline text into structured outline format
         This method analyzes the text and splits it into pages without modifying the original text
         
         Args:
             outline_text: User-provided outline text (may contain sections, titles, bullet points, etc.)
+            reference_files_content: Optional list of reference file contents
         
         Returns:
             List of outline items (may contain parts with pages or direct pages)
         """
-        parse_prompt = get_outline_parsing_prompt(outline_text)
+        parse_prompt = get_outline_parsing_prompt(outline_text, reference_files_content)
         
         response = self.client.models.generate_content(
             model=self.text_model,
@@ -156,7 +188,8 @@ class AIService:
         return pages
     
     def generate_page_description(self, idea_prompt: str, outline: List[Dict], 
-                                 page_outline: Dict, page_index: int) -> str:
+                                 page_outline: Dict, page_index: int,
+                                 reference_files_content: Optional[List[Dict[str, str]]] = None) -> str:
         """
         Generate description for a single page
         Based on demo.py gen_desc() logic
@@ -166,6 +199,7 @@ class AIService:
             outline: Complete outline
             page_outline: Outline for this specific page
             page_index: Page number (1-indexed)
+            reference_files_content: Optional reference files content
         
         Returns:
             Text description for the page
@@ -177,7 +211,8 @@ class AIService:
             outline=outline,
             page_outline=page_outline,
             page_index=page_index,
-            part_info=part_info
+            part_info=part_info,
+            reference_files_content=reference_files_content
         )
         
         response = self.client.models.generate_content(
@@ -301,6 +336,14 @@ class AIService:
                                 contents.append(downloaded_img)
                             else:
                                 logger.warning(f"Failed to download image from URL: {ref_img}, skipping...")
+                        elif ref_img.startswith('/files/mineru/'):
+                            # MinerU 本地文件路径，需要转换为文件系统路径（支持前缀匹配）
+                            local_path = self._convert_mineru_path_to_local(ref_img)
+                            if local_path and os.path.exists(local_path):
+                                contents.append(Image.open(local_path))
+                                logger.debug(f"Loaded MinerU image from local path: {local_path}")
+                            else:
+                                logger.warning(f"MinerU image file not found (with prefix matching): {ref_img}, skipping...")
                         else:
                             logger.warning(f"Invalid image reference: {ref_img}, skipping...")
             
@@ -374,17 +417,18 @@ class AIService:
         )
         return self.generate_image(edit_instruction, current_image_path, aspect_ratio, resolution, additional_ref_images)
     
-    def parse_description_to_outline(self, description_text: str) -> List[Dict]:
+    def parse_description_to_outline(self, description_text: str, reference_files_content: Optional[List[Dict[str, str]]] = None) -> List[Dict]:
         """
         从描述文本解析出大纲结构
         
         Args:
             description_text: 用户提供的完整页面描述文本
+            reference_files_content: 可选的参考文件内容列表
         
         Returns:
             List of outline items (may contain parts with pages or direct pages)
         """
-        parse_prompt = get_description_to_outline_prompt(description_text)
+        parse_prompt = get_description_to_outline_prompt(description_text, reference_files_content)
         
         response = self.client.models.generate_content(
             model=self.text_model,

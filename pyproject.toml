@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "reportlab>=4.1.0",
     "werkzeug>=3.0.1",
+    "markitdown[all]"
 ]
 
 [tool.uv]

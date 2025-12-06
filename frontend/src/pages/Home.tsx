@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, FileText, FileEdit, ImagePlus } from 'lucide-react';
-import { Button, Textarea, Card, useToast, MaterialGeneratorModal } from '@/components/shared';
+import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip } from 'lucide-react';
+import { Button, Textarea, Card, useToast, MaterialGeneratorModal, ReferenceFileCard, ReferenceFileSelector } from '@/components/shared';
 import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
-import { listUserTemplates, type UserTemplate } from '@/api/endpoints';
+import { listUserTemplates, type UserTemplate, uploadReferenceFile, type ReferenceFile, associateFileToProject } from '@/api/endpoints';
 import { useProjectStore } from '@/store/useProjectStore';
 
 type CreationType = 'idea' | 'outline' | 'description';
@@ -21,6 +21,10 @@ export const Home: React.FC = () => {
   const [isMaterialModalOpen, setIsMaterialModalOpen] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [userTemplates, setUserTemplates] = useState<UserTemplate[]>([]);
+  const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([]);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [isFileSelectorOpen, setIsFileSelectorOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 检查是否有当前项目 & 加载用户模板
   useEffect(() => {
@@ -44,6 +48,123 @@ export const Home: React.FC = () => {
   const handleOpenMaterialModal = () => {
     // 在主页始终生成全局素材，不关联任何项目
     setIsMaterialModalOpen(true);
+  };
+
+  // 检测粘贴事件，自动上传文件
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    console.log('Paste event triggered');
+    const items = e.clipboardData?.items;
+    if (!items) {
+      console.log('No clipboard items');
+      return;
+    }
+
+    console.log('Clipboard items:', items.length);
+    
+    // 检查是否有文件
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      console.log(`Item ${i}:`, { kind: item.kind, type: item.type });
+      
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        console.log('Got file:', file);
+        
+        if (file) {
+          console.log('File details:', { name: file.name, type: file.type, size: file.size });
+          
+          // 检查文件类型
+          const allowedExtensions = ['pdf', 'docx', 'pptx', 'doc', 'ppt', 'xlsx', 'xls', 'csv', 'txt', 'md'];
+          const fileExt = file.name.split('.').pop()?.toLowerCase();
+          
+          console.log('File extension:', fileExt);
+          
+          if (fileExt && allowedExtensions.includes(fileExt)) {
+            console.log('File type allowed, uploading...');
+            e.preventDefault(); // 阻止默认粘贴行为
+            await handleFileUpload(file);
+          } else {
+            console.log('File type not allowed');
+            show({ message: `不支持的文件类型: ${fileExt}`, type: 'warning' });
+          }
+        }
+      }
+    }
+  };
+
+  // 上传文件
+  // 在 Home 页面，文件始终上传为全局文件（不关联项目），因为此时还没有项目
+  const handleFileUpload = async (file: File) => {
+    if (isUploadingFile) return;
+
+    setIsUploadingFile(true);
+    try {
+      // 在 Home 页面，始终上传为全局文件
+      const response = await uploadReferenceFile(file, null);
+      if (response.data?.file) {
+        setReferenceFiles(prev => [...prev, response.data.file]);
+        show({ message: '文件上传成功', type: 'success' });
+      }
+    } catch (error: any) {
+      console.error('文件上传失败:', error);
+      show({ 
+        message: `文件上传失败: ${error?.response?.data?.error?.message || error.message || '未知错误'}`, 
+        type: 'error' 
+      });
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
+
+  // 从当前项目移除文件引用（不删除文件本身）
+  const handleFileRemove = (fileId: string) => {
+    setReferenceFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  // 文件状态变化回调
+  const handleFileStatusChange = (updatedFile: ReferenceFile) => {
+    setReferenceFiles(prev => 
+      prev.map(f => f.id === updatedFile.id ? updatedFile : f)
+    );
+  };
+
+  // 点击回形针按钮 - 打开文件选择器
+  const handlePaperclipClick = () => {
+    setIsFileSelectorOpen(true);
+  };
+
+  // 从选择器选择文件后的回调
+  const handleFilesSelected = (selectedFiles: ReferenceFile[]) => {
+    // 合并新选择的文件到列表（去重）
+    setReferenceFiles(prev => {
+      const existingIds = new Set(prev.map(f => f.id));
+      const newFiles = selectedFiles.filter(f => !existingIds.has(f.id));
+      // 合并时，如果文件已存在，更新其状态（可能解析状态已改变）
+      const updated = prev.map(f => {
+        const updatedFile = selectedFiles.find(sf => sf.id === f.id);
+        return updatedFile || f;
+      });
+      return [...updated, ...newFiles];
+    });
+    show({ message: `已添加 ${selectedFiles.length} 个参考文件`, type: 'success' });
+  };
+
+  // 获取当前已选择的文件ID列表，传递给选择器（使用 useMemo 避免每次渲染都重新计算）
+  const selectedFileIds = React.useMemo(() => {
+    return referenceFiles.map(f => f.id);
+  }, [referenceFiles]);
+
+  // 文件选择变化
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      await handleFileUpload(files[i]);
+    }
+
+    // 清空 input，允许重复选择同一文件
+    e.target.value = '';
   };
 
   const tabConfig = {
@@ -101,6 +222,18 @@ export const Home: React.FC = () => {
       return;
     }
 
+    // 检查是否有正在解析的文件
+    const parsingFiles = referenceFiles.filter(f => 
+      f.parse_status === 'pending' || f.parse_status === 'parsing'
+    );
+    if (parsingFiles.length > 0) {
+      show({ 
+        message: `还有 ${parsingFiles.length} 个参考文件正在解析中，请等待解析完成`, 
+        type: 'warning' 
+      });
+      return;
+    }
+
     try {
       // 如果有模板ID但没有File，按需加载
       let templateFile = selectedTemplate;
@@ -118,6 +251,27 @@ export const Home: React.FC = () => {
       if (!projectId) {
         show({ message: '项目创建失败', type: 'error' });
         return;
+      }
+      
+      // 关联参考文件到项目
+      if (referenceFiles.length > 0) {
+        console.log(`Associating ${referenceFiles.length} reference files to project ${projectId}:`, referenceFiles);
+        try {
+          // 批量更新文件的 project_id
+          const results = await Promise.all(
+            referenceFiles.map(async file => {
+              const response = await associateFileToProject(file.id, projectId);
+              console.log(`Associated file ${file.id}:`, response);
+              return response;
+            })
+          );
+          console.log('Reference files associated successfully:', results);
+        } catch (error) {
+          console.error('Failed to associate reference files:', error);
+          // 不影响主流程，继续执行
+        }
+      } else {
+        console.log('No reference files to associate');
       }
       
       if (activeTab === 'idea' || activeTab === 'outline') {
@@ -202,14 +356,71 @@ export const Home: React.FC = () => {
             {tabConfig[activeTab].description}
           </p>
 
-          {/* 输入区 */}
-          <Textarea
-            placeholder={tabConfig[activeTab].placeholder}
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={activeTab === 'idea' ? 4 : 10}
-            className="mb-6"
+          {/* 输入区 - 带按钮 */}
+          <div className="relative mb-2">
+            <Textarea
+              placeholder={tabConfig[activeTab].placeholder}
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              onPaste={handlePaste}
+              rows={activeTab === 'idea' ? 4 : 10}
+              className="pr-28 pb-14" // 为右下角按钮留空间
+            />
+
+            {/* 左下角：上传文件按钮（回形针图标） */}
+            <button
+              type="button"
+              onClick={handlePaperclipClick}
+              className="absolute left-3 bottom-3 z-10 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors active:scale-95"
+              title="选择参考文件"
+            >
+              <Paperclip size={20} />
+            </button>
+
+            {/* 右下角：开始生成按钮 */}
+            <div className="absolute right-3 bottom-3 z-10">
+              <Button
+                size="sm"
+                onClick={handleSubmit}
+                loading={isGlobalLoading}
+                disabled={
+                  !content.trim() || 
+                  referenceFiles.some(f => f.parse_status === 'pending' || f.parse_status === 'parsing')
+                }
+                className="shadow-sm"
+              >
+                {referenceFiles.some(f => f.parse_status === 'pending' || f.parse_status === 'parsing')
+                  ? '文件解析中...'
+                  : '下一步'}
+              </Button>
+            </div>
+          </div>
+
+          {/* 隐藏的文件输入 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md"
+            onChange={handleFileSelect}
+            className="hidden"
           />
+
+          {referenceFiles.length > 0 && (
+            <div className="mb-4">
+              <div className="space-y-2">
+                {referenceFiles.map(file => (
+                  <ReferenceFileCard
+                    key={file.id}
+                    file={file}
+                    onDelete={handleFileRemove}
+                    onStatusChange={handleFileStatusChange}
+                    deleteMode="remove"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 模板选择 */}
           <div className="mb-8">
@@ -225,17 +436,6 @@ export const Home: React.FC = () => {
             />
           </div>
 
-          {/* 提交按钮 */}
-          <div className="flex justify-center">
-            <Button
-              size="lg"
-              onClick={handleSubmit}
-              loading={isGlobalLoading}
-              className="w-64"
-            >
-              开始生成
-            </Button>
-          </div>
         </Card>
       </main>
       <ToastContainer />
@@ -244,6 +444,16 @@ export const Home: React.FC = () => {
         projectId={null}
         isOpen={isMaterialModalOpen}
         onClose={() => setIsMaterialModalOpen(false)}
+      />
+      {/* 参考文件选择器 */}
+      {/* 在 Home 页面，始终查询全局文件，因为此时还没有项目 */}
+      <ReferenceFileSelector
+        projectId={null}
+        isOpen={isFileSelectorOpen}
+        onClose={() => setIsFileSelectorOpen(false)}
+        onSelect={handleFilesSelected}
+        multiple={true}
+        initialSelectedIds={selectedFileIds}
       />
     </div>
   );

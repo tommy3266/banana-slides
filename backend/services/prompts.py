@@ -2,21 +2,52 @@
 AI Service Prompts - 集中管理所有 AI 服务的 prompt 模板
 """
 from textwrap import dedent
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
-def get_outline_generation_prompt(idea_prompt: str) -> str:
+def _format_reference_files_xml(reference_files_content: Optional[List[Dict[str, str]]]) -> str:
+    """
+    Format reference files content as XML structure
+    
+    Args:
+        reference_files_content: List of dicts with 'filename' and 'content' keys
+        
+    Returns:
+        Formatted XML string
+    """
+    if not reference_files_content:
+        return ""
+    
+    xml_parts = ["<uploaded_files>"]
+    for file_info in reference_files_content:
+        filename = file_info.get('filename', 'unknown')
+        content = file_info.get('content', '')
+        xml_parts.append(f'  <file name="{filename}">')
+        xml_parts.append('    <content>')
+        xml_parts.append(content)
+        xml_parts.append('    </content>')
+        xml_parts.append('  </file>')
+    xml_parts.append('</uploaded_files>')
+    xml_parts.append('')  # Empty line after XML
+    
+    return '\n'.join(xml_parts)
+
+
+def get_outline_generation_prompt(idea_prompt: str, reference_files_content: Optional[List[Dict[str, str]]] = None) -> str:
     """
     生成 PPT 大纲的 prompt
     
     Args:
         idea_prompt: 用户的想法/需求
+        reference_files_content: 可选的参考文件内容列表
         
     Returns:
         格式化后的 prompt 字符串
     """
+    files_xml = _format_reference_files_xml(reference_files_content)
+    
     return dedent(f"""\
-    You are a helpful assistant that generates an outline for a ppt.
+    {files_xml}You are a helpful assistant that generates an outline for a ppt.
     
     You can organize the content in two ways:
     
@@ -48,18 +79,21 @@ def get_outline_generation_prompt(idea_prompt: str) -> str:
     """)
 
 
-def get_outline_parsing_prompt(outline_text: str) -> str:
+def get_outline_parsing_prompt(outline_text: str, reference_files_content: Optional[List[Dict[str, str]]] = None) -> str:
     """
     解析用户提供的大纲文本的 prompt
     
     Args:
         outline_text: 用户提供的大纲文本
+        reference_files_content: 可选的参考文件内容列表
         
     Returns:
         格式化后的 prompt 字符串
     """
+    files_xml = _format_reference_files_xml(reference_files_content)
+    
     return dedent(f"""\
-    You are a helpful assistant that parses a user-provided PPT outline text into a structured format.
+    {files_xml}You are a helpful assistant that parses a user-provided PPT outline text into a structured format.
     
     The user has provided the following outline text:
     
@@ -107,7 +141,8 @@ def get_outline_parsing_prompt(outline_text: str) -> str:
 
 def get_page_description_prompt(idea_prompt: str, outline: list, 
                                 page_outline: dict, page_index: int, 
-                                part_info: str = "") -> str:
+                                part_info: str = "", 
+                                reference_files_content: Optional[List[Dict[str, str]]] = None) -> str:
     """
     生成单个页面描述的 prompt
     
@@ -117,12 +152,15 @@ def get_page_description_prompt(idea_prompt: str, outline: list,
         page_outline: 当前页面的大纲
         page_index: 页面编号（从1开始）
         part_info: 可选的章节信息
+        reference_files_content: 可选的参考文件内容列表
         
     Returns:
         格式化后的 prompt 字符串
     """
+    files_xml = _format_reference_files_xml(reference_files_content)
+    
     return dedent(f"""\
-    we are generating the text descriptionfor each ppt page.
+    {files_xml}we are generating the text descriptionfor each ppt page.
     the original user request is: \n{idea_prompt}\n
     We already have the entire outline: \n{outline}\n{part_info}
     Now please generate the description for page {page_index}:
@@ -136,6 +174,8 @@ def get_page_description_prompt(idea_prompt: str, outline: list,
     - 适应而非改造： 通过观察和模仿学习自然，发展出适应当地环境的生存技能。
     - 影响特点： 局部、短期、低强度，生态系统有充足的自我恢复能力。
     其他页面素材（如果有请加上，包括markdown图片链接等）
+    
+    提示：如果参考文件中包含以 /files/ 开头的本地文件URL图片（例如 /files/mineru/xxx/image.png），请将这些图片以markdown格式输出，例如：![图片描述](/files/mineru/xxx/image.png)，而不是作为普通文本。这些图片应该被包含在页面描述中，以便后续生成PPT时使用。
     
     使用全中文输出。
     """)
@@ -210,18 +250,21 @@ def get_image_edit_prompt(edit_instruction: str, original_description: str = Non
         return f"根据以下指令修改这张PPT页面：{edit_instruction}\n保持原有的内容结构和设计风格，只按照指令进行修改。"
 
 
-def get_description_to_outline_prompt(description_text: str) -> str:
+def get_description_to_outline_prompt(description_text: str, reference_files_content: Optional[List[Dict[str, str]]] = None) -> str:
     """
     从描述文本解析出大纲的 prompt
     
     Args:
         description_text: 用户提供的完整页面描述文本
+        reference_files_content: 可选的参考文件内容列表
         
     Returns:
         格式化后的 prompt 字符串
     """
+    files_xml = _format_reference_files_xml(reference_files_content)
+    
     return dedent(f"""\
-    You are a helpful assistant that analyzes a user-provided PPT description text and extracts the outline structure from it.
+    {files_xml}You are a helpful assistant that analyzes a user-provided PPT description text and extracts the outline structure from it.
     
     The user has provided the following description text:
     

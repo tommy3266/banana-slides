@@ -15,7 +15,9 @@ load_dotenv()
 from flask import Flask
 from flask_cors import CORS
 from models import db
+from config import Config
 from controllers.material_controller import material_bp, material_global_bp
+from controllers.reference_file_controller import reference_file_bp
 from controllers import project_bp, page_bp, template_bp, user_template_bp, export_bp, file_bp
 
 
@@ -64,6 +66,7 @@ def create_app():
     app.config['UPLOAD_FOLDER'] = upload_folder
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
     app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    app.config['ALLOWED_REFERENCE_FILE_EXTENSIONS'] = Config.ALLOWED_REFERENCE_FILE_EXTENSIONS
     
     # AI configuration
     app.config['GOOGLE_API_KEY'] = os.getenv('GOOGLE_API_KEY', '')
@@ -73,6 +76,11 @@ def create_app():
     app.config['DEFAULT_ASPECT_RATIO'] = "16:9"
     app.config['DEFAULT_RESOLUTION'] = "2K"
     app.config['LOG_LEVEL'] = os.getenv('LOG_LEVEL', 'INFO').upper()
+    
+    # MinerU configuration
+    app.config['MINERU_TOKEN'] = os.getenv('MINERU_TOKEN', '')
+    app.config['MINERU_API_BASE'] = os.getenv('MINERU_API_BASE', 'https://mineru.net')
+    app.config['IMAGE_CAPTION_MODEL'] = os.getenv('IMAGE_CAPTION_MODEL', 'gemini-2.5-flash')
     
     # CORS configuration
     raw_cors = os.getenv('CORS_ORIGINS', 'http://localhost:3000')
@@ -104,6 +112,7 @@ def create_app():
     app.register_blueprint(file_bp)
     app.register_blueprint(material_bp)
     app.register_blueprint(material_global_bp)
+    app.register_blueprint(reference_file_bp, url_prefix='/api/reference-files')
     
     with app.app_context():
         db.create_all()

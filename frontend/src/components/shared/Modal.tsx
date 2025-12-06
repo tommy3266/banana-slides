@@ -30,7 +30,7 @@ export const Modal: React.FC<ModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* 遮罩 */}
       <div
-        className="fixed inset-0 bg-black/50 transition-opacity"
+        className="fixed inset-0 bg-black/50 transition-opacity duration-200"
         onClick={onClose}
       />
       
@@ -38,7 +38,7 @@ export const Modal: React.FC<ModalProps> = ({
       <div className="flex min-h-full items-center justify-center p-4">
         <div
           className={cn(
-            'relative bg-white rounded-panel shadow-xl w-full',
+            'relative bg-white rounded-panel shadow-xl w-full transition-all duration-200',
             sizes[size]
           )}
           onClick={(e) => e.stopPropagation()}
