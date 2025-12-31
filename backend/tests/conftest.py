@@ -19,12 +19,12 @@ sys.path.insert(0, str(backend_path))
 os.environ['TESTING'] = 'true'
 os.environ['USE_MOCK_AI'] = 'true'  # 标记使用mock AI服务
 os.environ['GOOGLE_API_KEY'] = os.environ.get('GOOGLE_API_KEY', 'mock-api-key-for-testing')
-os.environ['FLASK_ENV'] = 'testing'
+os.environ['FASTAPI_ENV'] = 'testing'
 
 
 @pytest.fixture(scope='session')
 def app():
-    """创建Flask测试应用"""
+    """创建FastAPI测试应用"""
     # 创建临时目录用于测试
     temp_dir = tempfile.mkdtemp()
     temp_db = os.path.join(temp_dir, 'test.db')
@@ -32,24 +32,15 @@ def app():
     # 设置测试数据库路径
     os.environ['DATABASE_URL'] = f'sqlite:///{temp_db}'
     
-    # 现在导入app
-    from app import create_app
+    # 现在导入main
+    from main import create_app
     
     # 使用工厂函数创建测试应用
     test_app = create_app()
     
-    # 覆盖配置
-    test_app.config.update({
-        'TESTING': True,
-        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{temp_db}',
-        'WTF_CSRF_ENABLED': False,
-        'UPLOAD_FOLDER': temp_dir,
-    })
-    
-    # 创建应用上下文
-    with test_app.app_context():
-        from models import db
-        db.create_all()
+    # 创建测试数据库表
+    from models import Base, engine
+    Base.metadata.create_all(bind=engine)
     
     yield test_app
     
@@ -64,27 +55,35 @@ def app():
 @pytest.fixture(scope='function')
 def client(app):
     """创建测试客户端"""
-    with app.test_client() as test_client:
-        with app.app_context():
-            from models import db
-            # 清理旧数据，保持测试隔离
-            db.rollback()
-            for table in reversed(db.metadata.sorted_tables):
-                db.execute(table.delete())
-            db.commit()
-            yield test_client
-            db.rollback()
+    from fastapi.testclient import TestClient
+    from models import Base, engine, db_session
+    from database import get_db
+
+    # 创建测试客户端
+    test_client = TestClient(app)
+    
+    # 清理旧数据，保持测试隔离
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    
+    yield test_client
+    
+    # 关闭数据库会话
+    db_session.remove()
 
 
 @pytest.fixture(scope='function')
 def db_session(app):
     """创建数据库会话"""
-    with app.app_context():
-        from models import db
-        db.create_all()
-        yield db.session
-        db.remove()
-        db.drop_all()
+    from models import SessionLocal
+    from models import Base, engine
+    Base.metadata.create_all(bind=engine)
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
@@ -96,7 +95,7 @@ def sample_project(client):
             'idea_prompt': '测试PPT生成'
         }
     )
-    data = response.get_json()
+    data = response.json()
     return data['data'] if data.get('success') else None
 
 
@@ -164,7 +163,7 @@ def sample_image_file():
 def assert_success_response(response, status_code=200):
     """断言成功响应"""
     assert response.status_code == status_code
-    data = response.get_json()
+    data = response.json()  # Changed from get_json() to json() for FastAPI TestClient
     assert data is not None
     assert data.get('success') is True
     return data
@@ -174,8 +173,7 @@ def assert_error_response(response, expected_status=None):
     """断言错误响应"""
     if expected_status:
         assert response.status_code == expected_status
-    data = response.get_json()
+    data = response.json()  # Changed from get_json() to json() for FastAPI TestClient
     assert data is not None
     assert data.get('success') is False or 'error' in data
     return data
-

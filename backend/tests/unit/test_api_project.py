@@ -95,7 +95,7 @@ class TestProjectUpdate:
         
         # 状态更新应该成功
         assert response.status_code == 200
-        data = response.get_json()
+        data = response.json()  # Changed from get_json() to json() for FastAPI TestClient
         assert data['success'] is True
 
 
@@ -121,4 +121,3 @@ class TestProjectDelete:
         response = client.delete('/api/projects/non-existent-id')
         
         assert response.status_code == 404
-

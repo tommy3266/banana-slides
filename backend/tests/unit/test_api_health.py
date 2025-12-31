@@ -13,7 +13,7 @@ class TestHealthEndpoint:
         response = client.get('/health')
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = response.json()  # Changed from get_json() to json() for FastAPI TestClient
         assert data['status'] == 'ok'
         assert 'message' in data
     
@@ -21,8 +21,7 @@ class TestHealthEndpoint:
         """测试健康检查响应格式"""
         response = client.get('/health')
         
-        data = response.get_json()
+        data = response.json()  # Changed from get_json() to json() for FastAPI TestClient
         assert isinstance(data, dict)
         assert 'status' in data
         assert 'message' in data
-

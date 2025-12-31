@@ -36,7 +36,7 @@ async def upload_template(project_id: str, file: UploadFile = File(...)):
         # Save template
         upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
         file_service = FileService(upload_folder)
-        file_path = file_service.save_template_image_fastapi(file, project_id)
+        file_path = await file_service.save_template_image_fastapi(file, project_id)  # Added await
         
         # Update project
         project.template_image_path = file_path
@@ -130,7 +130,7 @@ async def upload_user_template(file: UploadFile = File(...), name: str = None):
         # Save template file first (using the generated ID)
         upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
         file_service = FileService(upload_folder)
-        file_path = file_service.save_user_template_fastapi(file, template_id)
+        file_path = await file_service.save_user_template_fastapi(file, template_id)  # Added await
         
         # Create template record with file_path already set
         template = UserTemplate(
@@ -195,4 +195,3 @@ async def delete_user_template(template_id: str):
     except Exception as e:
         db.rollback()
         return error_response('SERVER_ERROR', str(e), 500)
-

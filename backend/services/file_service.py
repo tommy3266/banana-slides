@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 from PIL import Image
 from models import Project
 from models import db
+import io
 
 
 class FileService:
@@ -51,7 +52,7 @@ class FileService:
     
     def save_template_image(self, file, project_id: str) -> str:
         """
-        Save template image file
+        Save template image file (Flask compatible)
         
         Args:
             file: FileStorage object from Flask request
@@ -69,6 +70,37 @@ class FileService:
         
         filepath = template_dir / filename
         file.save(str(filepath))
+        
+        # Return relative path
+        return filepath.relative_to(self.upload_folder).as_posix()
+
+    async def save_template_image_fastapi(self, file, project_id: str) -> str:
+        """
+        Save template image file (FastAPI compatible)
+        
+        Args:
+            file: UploadFile object from FastAPI request
+            project_id: Project ID
+        
+        Returns:
+            Relative file path from upload folder
+        """
+        template_dir = self._get_template_dir(project_id)
+        
+        # Secure filename and add unique suffix
+        original_filename = secure_filename(file.filename)
+        ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else 'png'
+        filename = f"template.{ext}"
+        
+        filepath = template_dir / filename
+        
+        # Read file content and save it
+        file_content = await file.read()
+        with open(str(filepath), 'wb') as f:
+            f.write(file_content)
+        
+        # Reset file pointer to beginning for potential reuse
+        await file.seek(0)
         
         # Return relative path
         return filepath.relative_to(self.upload_folder).as_posix()
@@ -298,7 +330,7 @@ class FileService:
     
     def save_user_template(self, file, template_id: str) -> str:
         """
-        Save user template image file
+        Save user template image file (Flask compatible)
         
         Args:
             file: FileStorage object from Flask request
@@ -321,6 +353,39 @@ class FileService:
         
         # Return relative path
         return filepath.relative_to(self.upload_folder).as_posix()
+
+    async def save_user_template_fastapi(self, file, template_id: str) -> str:
+        """
+        Save user template image file (FastAPI compatible)
+        
+        Args:
+            file: UploadFile object from FastAPI request
+            template_id: Template ID
+        
+        Returns:
+            Relative file path from upload folder
+        """
+        templates_dir = self._get_user_templates_dir()
+        template_dir = templates_dir / template_id
+        template_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Secure filename and preserve extension
+        original_filename = secure_filename(file.filename)
+        ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else 'png'
+        filename = f"template.{ext}"
+        
+        filepath = template_dir / filename
+        
+        # Read file content and save it
+        file_content = await file.read()
+        with open(str(filepath), 'wb') as f:
+            f.write(file_content)
+        
+        # Reset file pointer to beginning for potential reuse
+        await file.seek(0)
+        
+        # Return relative path
+        return filepath.relative_to(self.upload_folder).as_posix()
     
     def delete_user_template(self, template_id: str) -> bool:
         """
@@ -340,4 +405,3 @@ class FileService:
             shutil.rmtree(template_dir)
         
         return True
-    
