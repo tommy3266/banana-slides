@@ -1,8 +1,8 @@
 """
-Unified response format utilities
+Unified response format utilities for FastAPI
 """
-from flask import jsonify
-from typing import Any, Dict, Optional
+from fastapi.responses import JSONResponse
+from typing import Any, Dict, Optional, Union
 
 
 def success_response(data: Any = None, message: str = "Success", status_code: int = 200):
@@ -15,7 +15,7 @@ def success_response(data: Any = None, message: str = "Success", status_code: in
         status_code: HTTP status code
     
     Returns:
-        Flask response with JSON format
+        FastAPI JSONResponse
     """
     response = {
         "success": True,
@@ -25,7 +25,7 @@ def success_response(data: Any = None, message: str = "Success", status_code: in
     if data is not None:
         response["data"] = data
     
-    return jsonify(response), status_code
+    return JSONResponse(content=response, status_code=status_code)
 
 
 def error_response(error_code: str, message: str, status_code: int = 400):
@@ -38,15 +38,15 @@ def error_response(error_code: str, message: str, status_code: int = 400):
         status_code: HTTP status code
     
     Returns:
-        Flask response with JSON format
+        FastAPI JSONResponse
     """
-    return jsonify({
+    return JSONResponse(content={
         "success": False,
         "error": {
             "code": error_code,
             "message": message
         }
-    }), status_code
+    }, status_code=status_code)
 
 
 # Common error responses

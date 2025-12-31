@@ -4,29 +4,31 @@ Page model
 import uuid
 import json
 from datetime import datetime
-from . import db
+from sqlalchemy import Column, String, Text, DateTime, Integer, ForeignKey
+from sqlalchemy.orm import relationship
+from . import Base
 
 
-class Page(db.Model):
+class Page(Base):
     """
     Page model - represents a single PPT page/slide
     """
     __tablename__ = 'pages'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = db.Column(db.String(36), db.ForeignKey('projects.id'), nullable=False)
-    order_index = db.Column(db.Integer, nullable=False)
-    part = db.Column(db.String(200), nullable=True)  # Optional section name
-    outline_content = db.Column(db.Text, nullable=True)  # JSON string
-    description_content = db.Column(db.Text, nullable=True)  # JSON string
-    generated_image_path = db.Column(db.String(500), nullable=True)
-    status = db.Column(db.String(50), nullable=False, default='DRAFT')
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String(36), ForeignKey('projects.id'), nullable=False)
+    order_index = Column(Integer, nullable=False)
+    part = Column(String(200), nullable=True)  # Optional section name
+    outline_content = Column(Text, nullable=True)  # JSON string
+    description_content = Column(Text, nullable=True)  # JSON string
+    generated_image_path = Column(String(500), nullable=True)
+    status = Column(String(50), nullable=False, default='DRAFT')
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)  # Note: SQLAlchemy doesn't support onupdate in declarative base directly
     
     # Relationships
-    project = db.relationship('Project', back_populates='pages')
-    image_versions = db.relationship('PageImageVersion', back_populates='page', 
+    project = relationship('Project', back_populates='pages')
+    image_versions = relationship('PageImageVersion', back_populates='page', 
                                      lazy='dynamic', cascade='all, delete-orphan',
                                      order_by='PageImageVersion.version_number.desc()')
     
@@ -77,10 +79,11 @@ class Page(db.Model):
         }
         
         if include_versions:
-            data['image_versions'] = [v.to_dict() for v in self.image_versions.all()]
+            # For SQLAlchemy Core compatibility, use all() method
+            image_versions_list = self.image_versions.all() if hasattr(self.image_versions, 'all') else list(self.image_versions)
+            data['image_versions'] = [v.to_dict() for v in image_versions_list]
         
         return data
     
     def __repr__(self):
         return f'<Page {self.id}: {self.order_index} - {self.status}>'
-

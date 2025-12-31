@@ -3,21 +3,22 @@ User Template model - stores user-uploaded templates
 """
 import uuid
 from datetime import datetime
-from . import db
+from sqlalchemy import Column, String, Integer, DateTime
+from . import Base
 
 
-class UserTemplate(db.Model):
+class UserTemplate(Base):
     """
     User Template model - represents a user-uploaded template
     """
     __tablename__ = 'user_templates'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    name = db.Column(db.String(200), nullable=True)  # Optional template name
-    file_path = db.Column(db.String(500), nullable=False)
-    file_size = db.Column(db.Integer, nullable=True)  # File size in bytes
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String(200), nullable=True)  # Optional template name
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, nullable=True)  # File size in bytes
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)  # Note: SQLAlchemy doesn't support onupdate in declarative base directly
     
     def to_dict(self):
         """Convert to dictionary"""
@@ -31,4 +32,3 @@ class UserTemplate(db.Model):
     
     def __repr__(self):
         return f'<UserTemplate {self.id}: {self.name or "Unnamed"}>'
-

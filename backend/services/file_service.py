@@ -267,8 +267,8 @@ class FileService:
         """
         
         # 刷新数据库会话，确保获取最新数据
-        db.session.expire_all()
-        project = Project.query.get(project_id)
+        db.expire_all()
+        project = db.get(Project, project_id)
         if project and project.template_image_path:
             # template_image_path 是相对路径，需要转换为绝对路径
             template_path = self.upload_folder / project.template_image_path

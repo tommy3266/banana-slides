@@ -4,26 +4,28 @@ Task model for tracking async operations
 import uuid
 import json
 from datetime import datetime
-from . import db
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from . import Base
 
 
-class Task(db.Model):
+class Task(Base):
     """
     Task model - tracks asynchronous generation tasks
     """
     __tablename__ = 'tasks'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = db.Column(db.String(36), db.ForeignKey('projects.id'), nullable=False)
-    task_type = db.Column(db.String(50), nullable=False)  # GENERATE_DESCRIPTIONS|GENERATE_IMAGES
-    status = db.Column(db.String(50), nullable=False, default='PENDING')
-    progress = db.Column(db.Text, nullable=True)  # JSON string: {"total": 10, "completed": 5, "failed": 0}
-    error_message = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    completed_at = db.Column(db.DateTime, nullable=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String(36), ForeignKey('projects.id'), nullable=False)
+    task_type = Column(String(50), nullable=False)  # GENERATE_DESCRIPTIONS|GENERATE_IMAGES
+    status = Column(String(50), nullable=False, default='PENDING')
+    progress = Column(Text, nullable=True)  # JSON string: {"total": 10, "completed": 5, "failed": 0}
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
     
     # Relationships
-    project = db.relationship('Project', back_populates='tasks')
+    project = relationship('Project', back_populates='tasks')
     
     def get_progress(self):
         """Parse progress from JSON string"""
@@ -64,4 +66,3 @@ class Task(db.Model):
     
     def __repr__(self):
         return f'<Task {self.id}: {self.task_type} - {self.status}>'
-

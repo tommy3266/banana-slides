@@ -79,8 +79,8 @@ docker-compose*.yml
 .env.*.local
 
 # Others
-*.lock
-uv.lock
+#*.lock
+#uv.lock
 LICENSE
 PRD.md
 *.md

@@ -68,12 +68,12 @@ def client(app):
         with app.app_context():
             from models import db
             # 清理旧数据，保持测试隔离
-            db.session.rollback()
+            db.rollback()
             for table in reversed(db.metadata.sorted_tables):
-                db.session.execute(table.delete())
-            db.session.commit()
+                db.execute(table.delete())
+            db.commit()
             yield test_client
-            db.session.rollback()
+            db.rollback()
 
 
 @pytest.fixture(scope='function')
@@ -83,7 +83,7 @@ def db_session(app):
         from models import db
         db.create_all()
         yield db.session
-        db.session.remove()
+        db.remove()
         db.drop_all()
 
 

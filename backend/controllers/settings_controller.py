@@ -1,24 +1,22 @@
 """Settings Controller - handles application settings endpoints"""
 
 import logging
-from flask import Blueprint, request, current_app
+from fastapi import APIRouter, Request
 from models import db, Settings
 from utils import success_response, error_response, bad_request
 from datetime import datetime, timezone
 from config import Config
+import os
 
 logger = logging.getLogger(__name__)
 
-settings_bp = Blueprint(
-    "settings", __name__, url_prefix="/api/settings"
-)
+settings_router = APIRouter(prefix="/api/settings")
 
 
-# Prevent redirect issues when trailing slash is missing
-@settings_bp.route("/", methods=["GET"], strict_slashes=False)
-def get_settings():
+@settings_router.get("/")
+async def get_settings():
     """
-    GET /api/settings - Get application settings
+    Get application settings
     """
     try:
         settings = Settings.get_settings()
@@ -32,10 +30,10 @@ def get_settings():
         )
 
 
-@settings_bp.route("/", methods=["PUT"], strict_slashes=False)
-def update_settings():
+@settings_router.put("/")
+async def update_settings(request: Request):
     """
-    PUT /api/settings - Update application settings
+    Update application settings
 
     Request Body:
         {
@@ -46,7 +44,7 @@ def update_settings():
         }
     """
     try:
-        data = request.get_json()
+        data = await request.json()
         if not data:
             return bad_request("Request body is required")
 
@@ -124,7 +122,7 @@ def update_settings():
                 return bad_request("Output language must be 'zh', 'en', 'ja', or 'auto'")
 
         settings.updated_at = datetime.now(timezone.utc)
-        db.session.commit()
+        db.commit()
 
         # Sync to app.config
         _sync_settings_to_config(settings)
@@ -135,7 +133,7 @@ def update_settings():
         )
 
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"Error updating settings: {str(e)}")
         return error_response(
             "UPDATE_SETTINGS_ERROR",
@@ -144,10 +142,10 @@ def update_settings():
         )
 
 
-@settings_bp.route("/reset", methods=["POST"], strict_slashes=False)
-def reset_settings():
+@settings_router.post("/reset")
+async def reset_settings():
     """
-    POST /api/settings/reset - Reset settings to default values
+    Reset settings to default values
     """
     try:
         settings = Settings.get_settings()
@@ -180,7 +178,7 @@ def reset_settings():
         settings.max_image_workers = Config.MAX_IMAGE_WORKERS
         settings.updated_at = datetime.now(timezone.utc)
 
-        db.session.commit()
+        db.commit()
 
         # Sync to app.config
         _sync_settings_to_config(settings)
@@ -191,7 +189,7 @@ def reset_settings():
         )
 
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"Error resetting settings: {str(e)}")
         return error_response(
             "RESET_SETTINGS_ERROR",
@@ -201,54 +199,55 @@ def reset_settings():
 
 
 def _sync_settings_to_config(settings: Settings):
-    """Sync settings to Flask app config"""
+    """Sync settings to FastAPI app config"""
+    # In FastAPI, we sync settings to environment variables
     # Sync AI provider format (always sync, has default value)
     if settings.ai_provider_format:
-        current_app.config["AI_PROVIDER_FORMAT"] = settings.ai_provider_format
+        os.environ["AI_PROVIDER_FORMAT"] = settings.ai_provider_format
         logger.info(f"Updated AI_PROVIDER_FORMAT to: {settings.ai_provider_format}")
     
     # Sync API configuration (sync to both GOOGLE_* and OPENAI_* to ensure DB settings override env vars)
     if settings.api_base_url is not None:
-        current_app.config["GOOGLE_API_BASE"] = settings.api_base_url
-        current_app.config["OPENAI_API_BASE"] = settings.api_base_url
+        os.environ["GOOGLE_API_BASE"] = settings.api_base_url
+        os.environ["OPENAI_API_BASE"] = settings.api_base_url
         logger.info(f"Updated API_BASE to: {settings.api_base_url}")
     else:
         # Remove overrides, fall back to env variables or defaults
-        current_app.config.pop("GOOGLE_API_BASE", None)
-        current_app.config.pop("OPENAI_API_BASE", None)
+        os.environ.pop("GOOGLE_API_BASE", None)
+        os.environ.pop("OPENAI_API_BASE", None)
 
     if settings.api_key is not None:
-        current_app.config["GOOGLE_API_KEY"] = settings.api_key
-        current_app.config["OPENAI_API_KEY"] = settings.api_key
+        os.environ["GOOGLE_API_KEY"] = settings.api_key
+        os.environ["OPENAI_API_KEY"] = settings.api_key
         logger.info("Updated API key from settings")
     else:
         # Remove overrides, fall back to env variables or defaults
-        current_app.config.pop("GOOGLE_API_KEY", None)
-        current_app.config.pop("OPENAI_API_KEY", None)
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
 
     # Sync image generation settings
-    current_app.config["DEFAULT_RESOLUTION"] = settings.image_resolution
-    current_app.config["DEFAULT_ASPECT_RATIO"] = settings.image_aspect_ratio
+    os.environ["DEFAULT_RESOLUTION"] = settings.image_resolution
+    os.environ["DEFAULT_ASPECT_RATIO"] = settings.image_aspect_ratio
     logger.info(f"Updated image settings: {settings.image_resolution}, {settings.image_aspect_ratio}")
 
     # Sync worker settings
-    current_app.config["MAX_DESCRIPTION_WORKERS"] = settings.max_description_workers
-    current_app.config["MAX_IMAGE_WORKERS"] = settings.max_image_workers
+    os.environ["MAX_DESCRIPTION_WORKERS"] = str(settings.max_description_workers)
+    os.environ["MAX_IMAGE_WORKERS"] = str(settings.max_image_workers)
     logger.info(f"Updated worker settings: desc={settings.max_description_workers}, img={settings.max_image_workers}")
 
     # Sync model & MinerU settings (optional, fall back to Config defaults if None)
     if settings.text_model:
-        current_app.config["TEXT_MODEL"] = settings.text_model
+        os.environ["TEXT_MODEL"] = settings.text_model
         logger.info(f"Updated TEXT_MODEL to: {settings.text_model}")
     if settings.image_model:
-        current_app.config["IMAGE_MODEL"] = settings.image_model
+        os.environ["IMAGE_MODEL"] = settings.image_model
         logger.info(f"Updated IMAGE_MODEL to: {settings.image_model}")
     if settings.mineru_api_base:
-        current_app.config["MINERU_API_BASE"] = settings.mineru_api_base
+        os.environ["MINERU_API_BASE"] = settings.mineru_api_base
         logger.info(f"Updated MINERU_API_BASE to: {settings.mineru_api_base}")
     if settings.mineru_token is not None:
-        current_app.config["MINERU_TOKEN"] = settings.mineru_token
+        os.environ["MINERU_TOKEN"] = settings.mineru_token
         logger.info("Updated MINERU_TOKEN from settings")
     if settings.image_caption_model:
-        current_app.config["IMAGE_CAPTION_MODEL"] = settings.image_caption_model
+        os.environ["IMAGE_CAPTION_MODEL"] = settings.image_caption_model
         logger.info(f"Updated IMAGE_CAPTION_MODEL to: {settings.image_caption_model}")

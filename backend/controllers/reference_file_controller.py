@@ -5,7 +5,7 @@ import os
 import logging
 import re
 import uuid
-from flask import Blueprint, request, current_app
+from fastapi import APIRouter, Request, UploadFile, File
 from werkzeug.utils import secure_filename
 from pathlib import Path
 from config import Config
@@ -19,7 +19,61 @@ from services.file_parser_service import FileParserService
 
 logger = logging.getLogger(__name__)
 
-reference_file_bp = Blueprint('reference_file', __name__)
+reference_file_router = APIRouter(prefix='/api/reference-files')
+
+
+@reference_file_router.get('')
+async def list_reference_files(request: Request):
+    """
+    Get all reference files or filter by project_id
+    """
+    try:
+        query_params = dict(request.query_params)
+        project_id = query_params.get('project_id')
+
+        if project_id:
+            reference_files = db.query(ReferenceFile).filter(
+                ReferenceFile.project_id == project_id
+            ).order_by(ReferenceFile.created_at.desc()).all()
+        else:
+            reference_files = db.query(ReferenceFile).order_by(ReferenceFile.created_at.desc()).all()
+
+        reference_files_list = [rf.to_dict() for rf in reference_files]
+
+        return success_response({
+            "reference_files": reference_files_list,
+            "count": len(reference_files_list)
+        })
+
+    except Exception as e:
+        logger.error(f"list_reference_files failed: {str(e)}", exc_info=True)
+        return error_response('SERVER_ERROR', str(e), 500)
+
+
+@reference_file_router.get('/project/{project_id}')
+async def get_reference_files_by_project(project_id: str):
+    """
+    Get reference files for a specific project
+    """
+    try:
+        # Import here to avoid circular imports
+        from models import ReferenceFile
+
+        # Query reference files for this project
+        reference_files = db.query(ReferenceFile).filter(
+            ReferenceFile.project_id == project_id
+        ).order_by(ReferenceFile.created_at.desc()).all()
+
+        reference_files_list = [rf.to_dict() for rf in reference_files]
+
+        return success_response({
+            "reference_files": reference_files_list,
+            "count": len(reference_files_list)
+        })
+
+    except Exception as e:
+        logger.error(f"get_reference_files_by_project failed: {str(e)}", exc_info=True)
+        return error_response('SERVER_ERROR', str(e), 500)
 
 
 def _allowed_file(filename: str, allowed_extensions: set) -> bool:
@@ -43,67 +97,66 @@ def _parse_file_async(file_id: str, file_path: str, filename: str, app):
         file_id: Reference file ID
         file_path: Path to the uploaded file
         filename: Original filename
-        app: Flask app instance (for app context)
+        app: FastAPI app instance
     """
-    with app.app_context():
-        try:
-            reference_file = ReferenceFile.query.get(file_id)
-            if not reference_file:
-                logger.error(f"Reference file {file_id} not found")
-                return
-            
-            # Update status to parsing
-            reference_file.parse_status = 'parsing'
-            db.session.commit()
-            
-            # Initialize parser service
-            parser = FileParserService(
-                mineru_token=current_app.config['MINERU_TOKEN'],
-                mineru_api_base=current_app.config['MINERU_API_BASE'],
-                google_api_key=current_app.config.get('GOOGLE_API_KEY', ''),
-                google_api_base=current_app.config.get('GOOGLE_API_BASE', ''),
-                openai_api_key=current_app.config.get('OPENAI_API_KEY', ''),
-                openai_api_base=current_app.config.get('OPENAI_API_BASE', ''),
-                image_caption_model=current_app.config['IMAGE_CAPTION_MODEL'],
-                provider_format=current_app.config.get('AI_PROVIDER_FORMAT', 'gemini')
-            )
-            
-            # Parse file
-            logger.info(f"Starting to parse file: {filename}")
-            batch_id, markdown_content, extract_id, error_message, failed_image_count = parser.parse_file(file_path, filename)
-            
-            # Update database
-            reference_file.mineru_batch_id = batch_id
-            if error_message:
-                reference_file.parse_status = 'failed'
-                reference_file.error_message = error_message
-                logger.error(f"File parsing failed: {error_message}")
+    try:
+        reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
+        if not reference_file:
+            logger.error(f"Reference file {file_id} not found")
+            return
+        
+        # Update status to parsing
+        reference_file.parse_status = 'parsing'
+        db.commit()
+        
+        # Initialize parser service with environment variables
+        parser = FileParserService(
+            mineru_token=os.getenv('MINERU_TOKEN', ''),
+            mineru_api_base=os.getenv('MINERU_API_BASE', ''),
+            google_api_key=os.getenv('GOOGLE_API_KEY', ''),
+            google_api_base=os.getenv('GOOGLE_API_BASE', ''),
+            openai_api_key=os.getenv('OPENAI_API_KEY', ''),
+            openai_api_base=os.getenv('OPENAI_API_BASE', ''),
+            image_caption_model=os.getenv('IMAGE_CAPTION_MODEL', 'gemini-3-flash-preview'),
+            provider_format=os.getenv('AI_PROVIDER_FORMAT', 'gemini')
+        )
+        
+        # Parse file
+        logger.info(f"Starting to parse file: {filename}")
+        batch_id, markdown_content, extract_id, error_message, failed_image_count = parser.parse_file(file_path, filename)
+        
+        # Update database
+        reference_file.mineru_batch_id = batch_id
+        if error_message:
+            reference_file.parse_status = 'failed'
+            reference_file.error_message = error_message
+            logger.error(f"File parsing failed: {error_message}")
+        else:
+            reference_file.parse_status = 'completed'
+            reference_file.markdown_content = markdown_content
+            if failed_image_count > 0:
+                logger.warning(f"File parsing completed: {filename}, but {failed_image_count} images failed to generate captions")
             else:
-                reference_file.parse_status = 'completed'
-                reference_file.markdown_content = markdown_content
-                if failed_image_count > 0:
-                    logger.warning(f"File parsing completed: {filename}, but {failed_image_count} images failed to generate captions")
-                else:
-                    logger.info(f"File parsing completed: {filename}")
-            
-            reference_file.updated_at = datetime.utcnow()
-            db.session.commit()
-            
-        except Exception as e:
-            logger.error(f"Error in async file parsing: {str(e)}", exc_info=True)
-            try:
-                reference_file = ReferenceFile.query.get(file_id)
-                if reference_file:
-                    reference_file.parse_status = 'failed'
-                    reference_file.error_message = f"Parsing error: {str(e)}"
-                    reference_file.updated_at = datetime.utcnow()
-                    db.session.commit()
-            except Exception as db_error:
-                logger.error(f"Failed to update error status: {str(db_error)}")
+                logger.info(f"File parsing completed: {filename}")
+        
+        reference_file.updated_at = datetime.utcnow()
+        db.commit()
+        
+    except Exception as e:
+        logger.error(f"Error in async file parsing: {str(e)}", exc_info=True)
+        try:
+            reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
+            if reference_file:
+                reference_file.parse_status = 'failed'
+                reference_file.error_message = f"Parsing error: {str(e)}"
+                reference_file.updated_at = datetime.utcnow()
+                db.commit()
+        except Exception as db_error:
+            logger.error(f"Failed to update error status: {str(db_error)}")
 
 
-@reference_file_bp.route('/upload', methods=['POST'])
-def upload_reference_file():
+@reference_file_router.post('/upload')
+async def upload_reference_file(request: Request, file: UploadFile = File(...), project_id: str = None):
     """
     POST /api/reference-files/upload - Upload a reference file
     
@@ -115,12 +168,6 @@ def upload_reference_file():
         Reference file information with status
     """
     try:
-        # Check if file is in request
-        if 'file' not in request.files:
-            return bad_request("No file provided")
-        
-        file = request.files['file']
-        
         # Get filename - handle encoding issues with non-ASCII characters
         original_filename = file.filename
         if not original_filename or original_filename == '':
@@ -142,18 +189,16 @@ def upload_reference_file():
         logger.info(f"Received file upload: {original_filename}")
         
         # Check file extension
-        
-        allowed_extensions = current_app.config.get('ALLOWED_REFERENCE_FILE_EXTENSIONS', Config.ALLOWED_REFERENCE_FILE_EXTENSIONS)
+        allowed_extensions = set(Config.ALLOWED_REFERENCE_FILE_EXTENSIONS)
         if not _allowed_file(original_filename, allowed_extensions):
             return bad_request(f"File type not allowed. Allowed types: {', '.join(allowed_extensions)}")
         
-        # Get project_id (optional)
-        project_id = request.form.get('project_id')
+        # Process project_id (optional)
         if project_id == 'none' or not project_id:
             project_id = None
         else:
             # Verify project exists
-            project = Project.query.get(project_id)
+            project = db.query(Project).filter(Project.id == project_id).first()
             if not project:
                 return not_found('Project')
         
@@ -171,7 +216,7 @@ def upload_reference_file():
             logger.warning(f"Original filename '{original_filename}' was sanitized to '{filename}'")
         
         # Create upload directory structure
-        upload_folder = current_app.config['UPLOAD_FOLDER']
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
         reference_files_dir = Path(upload_folder) / 'reference_files'
         reference_files_dir.mkdir(parents=True, exist_ok=True)
         
@@ -181,9 +226,11 @@ def upload_reference_file():
         unique_filename = f"{unique_id}_{filename}"
         file_path = reference_files_dir / unique_filename
         
-        # Save file
-        file.save(str(file_path))
-        file_size = os.path.getsize(file_path)
+        # Save file content
+        file_content = await file.read()
+        with open(str(file_path), 'wb') as f:
+            f.write(file_content)
+        file_size = len(file_content)
         
         # Create database record
         reference_file = ReferenceFile(
@@ -195,31 +242,42 @@ def upload_reference_file():
             parse_status='pending'
         )
         
-        db.session.add(reference_file)
-        db.session.commit()
+        db.add(reference_file)
+        db.commit()
         
         logger.info(f"File uploaded: {original_filename} (ID: {reference_file.id})")
         
-        # Lazy parsing: 不立即解析，等待用户选择确定后再解析
-        # 解析将在用户选择文件并确认时触发
+        # Start background parsing thread
+        # Use threading to avoid blocking the response
+        from main import app  # Import the app instance
+        thread = threading.Thread(
+            target=_parse_file_async,
+            args=(reference_file.id, str(file_path), original_filename, app)
+        )
+        thread.daemon = True
+        thread.start()
         
-        return success_response({'file': reference_file.to_dict()})
+        return success_response(
+            data=reference_file.to_dict(),
+            message="File uploaded successfully, parsing started",
+            status_code=201
+        )
         
     except Exception as e:
         logger.error(f"Error uploading reference file: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@reference_file_bp.route('/<file_id>', methods=['GET'])
-def get_reference_file(file_id):
+@reference_file_router.get('/{file_id}')
+async def get_reference_file(file_id: str):
     """
-    GET /api/reference-files/<file_id> - Get reference file information
+    Get reference file information
     
     Returns:
         Reference file information including parse status
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -231,22 +289,22 @@ def get_reference_file(file_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@reference_file_bp.route('/<file_id>', methods=['DELETE'])
-def delete_reference_file(file_id):
+@reference_file_router.delete('/{file_id}')
+async def delete_reference_file(file_id: str):
     """
-    DELETE /api/reference-files/<file_id> - Delete a reference file
+    Delete a reference file
     
     Returns:
         Success message
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
         if not reference_file:
             return not_found('Reference file')
         
         # Delete file from disk
         try:
-            upload_folder = current_app.config['UPLOAD_FOLDER']
+            upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
             file_path = Path(upload_folder) / reference_file.file_path
             if file_path.exists():
                 file_path.unlink()
@@ -255,8 +313,8 @@ def delete_reference_file(file_id):
             logger.warning(f"Failed to delete file from disk: {str(e)}")
         
         # Delete from database
-        db.session.delete(reference_file)
-        db.session.commit()
+        db.delete(reference_file)
+        db.commit()
         
         logger.info(f"Deleted reference file: {file_id}")
         
@@ -267,10 +325,10 @@ def delete_reference_file(file_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@reference_file_bp.route('/project/<project_id>', methods=['GET'])
-def list_project_reference_files(project_id):
+@reference_file_router.get('/project/{project_id}')
+async def list_project_reference_files(project_id: str):
     """
-    GET /api/reference-files/project/<project_id> - List all reference files for a project
+    List all reference files for a project
     
     Special values:
     - 'all': List all reference files (global + all projects)
@@ -283,17 +341,17 @@ def list_project_reference_files(project_id):
     try:
         # Special case: 'all' means list all files
         if project_id == 'all':
-            reference_files = ReferenceFile.query.all()
+            reference_files = db.query(ReferenceFile).all()
         # Special case: 'global' or 'none' means list global files (not associated with any project)
         elif project_id in ['global', 'none']:
-            reference_files = ReferenceFile.query.filter_by(project_id=None).all()
+            reference_files = db.query(ReferenceFile).filter(ReferenceFile.project_id.is_(None)).all()
         else:
             # Verify project exists
-            project = Project.query.get(project_id)
+            project = db.query(Project).filter(Project.id == project_id).first()
             if not project:
                 return not_found('Project')
             
-            reference_files = ReferenceFile.query.filter_by(project_id=project_id).all()
+            reference_files = db.query(ReferenceFile).filter(ReferenceFile.project_id == project_id).all()
         
         # 列表查询时不包含 markdown_content 和失败计数，加快响应速度
         return success_response({
@@ -305,16 +363,16 @@ def list_project_reference_files(project_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@reference_file_bp.route('/<file_id>/parse', methods=['POST'])
-def trigger_file_parse(file_id):
+@reference_file_router.post('/{file_id}/parse')
+async def trigger_file_parse(file_id: str):
     """
-    POST /api/reference-files/<file_id>/parse - Trigger parsing for a reference file
+    Trigger parsing for a reference file
     
     Returns:
         Updated reference file information
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -332,19 +390,20 @@ def trigger_file_parse(file_id):
             # 清空之前的解析结果，以便重新解析
             reference_file.markdown_content = None
             reference_file.mineru_batch_id = None
-            db.session.commit()
+            db.commit()
         
         # 获取文件路径
-        upload_folder = current_app.config['UPLOAD_FOLDER']
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
         file_path = Path(upload_folder) / reference_file.file_path
         
         if not file_path.exists():
             return error_response('FILE_NOT_FOUND', f'File not found: {file_path}', 404)
         
         # 启动异步解析
+        from main import app  # Import the app instance
         thread = threading.Thread(
             target=_parse_file_async,
-            args=(reference_file.id, str(file_path), reference_file.filename, current_app._get_current_object())
+            args=(reference_file.id, str(file_path), reference_file.filename, app)
         )
         thread.daemon = True
         thread.start()
@@ -361,10 +420,10 @@ def trigger_file_parse(file_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@reference_file_bp.route('/<file_id>/associate', methods=['POST'])
-def associate_file_to_project(file_id):
+@reference_file_router.post('/{file_id}/associate')
+async def associate_file_to_project(file_id: str, request: Request):
     """
-    POST /api/reference-files/<file_id>/associate - Associate a reference file to a project
+    Associate a reference file to a project
     
     Request body:
     {
@@ -375,25 +434,25 @@ def associate_file_to_project(file_id):
         Updated reference file information
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
         if not reference_file:
             return not_found('Reference file')
         
-        data = request.get_json() or {}
+        data = await request.json() or {}
         project_id = data.get('project_id')
         
         if not project_id:
             return bad_request("project_id is required")
         
         # Verify project exists
-        project = Project.query.get(project_id)
+        project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             return not_found('Project')
         
         # Update file's project_id
         reference_file.project_id = project_id
         reference_file.updated_at = datetime.utcnow()
-        db.session.commit()
+        db.commit()
         
         logger.info(f"Associated reference file {file_id} to project {project_id}")
         
@@ -404,10 +463,10 @@ def associate_file_to_project(file_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@reference_file_bp.route('/<file_id>/dissociate', methods=['POST'])
-def dissociate_file_from_project(file_id):
+@reference_file_router.post('/{file_id}/dissociate')
+async def dissociate_file_from_project(file_id: str):
     """
-    POST /api/reference-files/<file_id>/dissociate - Remove a reference file from its project
+    Remove a reference file from its project
     
     This sets the file's project_id to None, effectively making it a global file.
     The file itself is not deleted.
@@ -416,14 +475,14 @@ def dissociate_file_from_project(file_id):
         Updated reference file information
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        reference_file = db.query(ReferenceFile).filter(ReferenceFile.id == file_id).first()
         if not reference_file:
             return not_found('Reference file')
         
         # Remove project association
         reference_file.project_id = None
         reference_file.updated_at = datetime.utcnow()
-        db.session.commit()
+        db.commit()
         
         logger.info(f"Dissociated reference file {file_id} from project")
         

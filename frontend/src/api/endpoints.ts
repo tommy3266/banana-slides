@@ -608,7 +608,8 @@ export const uploadUserTemplate = async (
  */
 export const listUserTemplates = async (): Promise<ApiResponse<{ templates: UserTemplate[] }>> => {
   const response = await apiClient.get<ApiResponse<{ templates: UserTemplate[] }>>(
-    '/api/user-templates'
+    // '/api/user-templates'
+    '/api/user-templates/list'
   );
   return response.data;
 };

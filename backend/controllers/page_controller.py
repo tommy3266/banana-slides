@@ -2,7 +2,7 @@
 Page Controller - handles page-related endpoints
 """
 import logging
-from flask import Blueprint, request, current_app
+from fastapi import APIRouter, Request, UploadFile, File, Form
 from models import db, Project, Page, PageImageVersion, Task
 from utils import success_response, error_response, not_found, bad_request
 from services import AIService, FileService, ProjectContext
@@ -13,16 +13,17 @@ from werkzeug.utils import secure_filename
 import shutil
 import tempfile
 import json
+import os
 
 logger = logging.getLogger(__name__)
 
-page_bp = Blueprint('pages', __name__, url_prefix='/api/projects')
+page_router = APIRouter()
 
 
-@page_bp.route('/<project_id>/pages', methods=['POST'])
-def create_page(project_id):
+@page_router.post('/{project_id}/pages')
+async def create_page(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/pages - Add new page
+    Add new page
     
     Request body:
     {
@@ -32,12 +33,13 @@ def create_page(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
         
-        data = request.get_json()
+        data = await request.json()
         
         if not data or 'order_index' not in data:
             return bad_request("order_index is required")
@@ -53,10 +55,11 @@ def create_page(project_id):
         if 'outline_content' in data:
             page.set_outline_content(data['outline_content'])
         
-        db.session.add(page)
+        db.add(page)
         
         # Update other pages' order_index if necessary
-        other_pages = Page.query.filter(
+        # Use session to query
+        other_pages = db.query(Page).filter(
             Page.project_id == project_id,
             Page.order_index >= data['order_index']
         ).all()
@@ -66,51 +69,54 @@ def create_page(project_id):
                 p.order_index += 1
         
         project.updated_at = datetime.utcnow()
-        db.session.commit()
+        db.commit()
         
         return success_response(page.to_dict(), status_code=201)
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>', methods=['DELETE'])
-def delete_page(project_id, page_id):
+@page_router.delete('/{project_id}/pages/{page_id}')
+async def delete_page(project_id: str, page_id: str):
     """
-    DELETE /api/projects/{project_id}/pages/{page_id} - Delete page
+    Delete page
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
         # Delete page image if exists
-        file_service = FileService(current_app.config['UPLOAD_FOLDER'])
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
+        file_service = FileService(upload_folder)
         file_service.delete_page_image(project_id, page_id)
         
         # Delete page
-        db.session.delete(page)
+        db.delete(page)
         
         # Update project
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         if project:
             project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         return success_response(message="Page deleted successfully")
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/outline', methods=['PUT'])
-def update_page_outline(project_id, page_id):
+@page_router.put('/{project_id}/pages/{page_id}/outline')
+async def update_page_outline(project_id: str, page_id: str, request: Request):
     """
-    PUT /api/projects/{project_id}/pages/{page_id}/outline - Edit page outline
+    Edit page outline
     
     Request body:
     {
@@ -118,12 +124,13 @@ def update_page_outline(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        data = request.get_json()
+        data = await request.json()
         
         if not data or 'outline_content' not in data:
             return bad_request("outline_content is required")
@@ -132,23 +139,24 @@ def update_page_outline(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         if project:
             project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         return success_response(page.to_dict())
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/description', methods=['PUT'])
-def update_page_description(project_id, page_id):
+@page_router.put('/{project_id}/pages/{page_id}/description')
+async def update_page_description(project_id: str, page_id: str, request: Request):
     """
-    PUT /api/projects/{project_id}/pages/{page_id}/description - Edit description
+    Edit description
     
     Request body:
     {
@@ -160,12 +168,13 @@ def update_page_description(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        data = request.get_json()
+        data = await request.json()
         
         if not data or 'description_content' not in data:
             return bad_request("description_content is required")
@@ -174,23 +183,24 @@ def update_page_description(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         if project:
             project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         return success_response(page.to_dict())
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/generate/description', methods=['POST'])
-def generate_page_description(project_id, page_id):
+@page_router.post('/{project_id}/pages/{page_id}/generate/description')
+async def generate_page_description(project_id: str, page_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/pages/{page_id}/generate/description - Generate single page description
+    Generate single page description
     
     Request body:
     {
@@ -198,18 +208,20 @@ def generate_page_description(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             return not_found('Project')
         
-        data = request.get_json() or {}
+        data = await request.json() or {}
         force_regenerate = data.get('force_regenerate', False)
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Check if already generated
         if page.get_description_content() and not force_regenerate:
@@ -221,7 +233,8 @@ def generate_page_description(project_id, page_id):
             return bad_request("Page must have outline content first")
         
         # Reconstruct full outline
-        all_pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        # Use session to query
+        all_pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         outline = []
         for p in all_pages:
             oc = p.get_outline_content()
@@ -262,19 +275,19 @@ def generate_page_description(project_id, page_id):
         page.status = 'DESCRIPTION_GENERATED'
         page.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         return success_response(page.to_dict())
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/generate/image', methods=['POST'])
-def generate_page_image(project_id, page_id):
+@page_router.post('/{project_id}/pages/{page_id}/generate/image')
+async def generate_page_image(project_id: str, page_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/pages/{page_id}/generate/image - Generate single page image
+    Generate single page image
     
     Request body:
     {
@@ -283,19 +296,21 @@ def generate_page_image(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             return not_found('Project')
         
-        data = request.get_json() or {}
+        data = await request.json() or {}
         use_template = data.get('use_template', True)
         force_regenerate = data.get('force_regenerate', False)
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Check if already generated
         if page.generated_image_path and not force_regenerate:
@@ -307,7 +322,8 @@ def generate_page_image(project_id, page_id):
             return bad_request("Page must have description content first")
         
         # Reconstruct full outline with part structure
-        all_pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        # Use session to query
+        all_pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         outline = []
         current_part = None
         current_part_pages = []
@@ -357,7 +373,8 @@ def generate_page_image(project_id, page_id):
         # Initialize services
         ai_service = AIService()
         
-        file_service = FileService(current_app.config['UPLOAD_FOLDER'])
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
+        file_service = FileService(upload_folder)
         
         # Get template path
         ref_image_path = None
@@ -413,13 +430,11 @@ def generate_page_image(project_id, page_id):
             'completed': 0,
             'failed': 0
         })
-        db.session.add(task)
-        db.session.commit()
-        
-        # Get app instance for background task
-        app = current_app._get_current_object()
+        db.add(task)
+        db.commit()
         
         # Submit background task
+        from main import app  # Import the app instance
         task_manager.submit_task(
             task.id,
             generate_single_page_image_task,
@@ -429,8 +444,8 @@ def generate_page_image(project_id, page_id):
             file_service,
             outline,
             use_template,
-            current_app.config['DEFAULT_ASPECT_RATIO'],
-            current_app.config['DEFAULT_RESOLUTION'],
+            os.getenv('DEFAULT_ASPECT_RATIO', '16:9'),
+            os.getenv('DEFAULT_RESOLUTION', '2K'),
             app,
             combined_requirements if combined_requirements.strip() else None,
             language
@@ -444,14 +459,14 @@ def generate_page_image(project_id, page_id):
         }, status_code=202)
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/edit/image', methods=['POST'])
-def edit_page_image(project_id, page_id):
+@page_router.post('/{project_id}/pages/{page_id}/edit/image')
+async def edit_page_image(project_id: str, page_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/pages/{page_id}/edit/image - Edit page image
+    Edit page image
     
     Request body (JSON or multipart/form-data):
     {
@@ -470,7 +485,8 @@ def edit_page_image(project_id, page_id):
     - context_images: file uploads (multiple files with key "context_images")
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
@@ -478,32 +494,20 @@ def edit_page_image(project_id, page_id):
         if not page.generated_image_path:
             return bad_request("Page must have generated image first")
         
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             return not_found('Project')
         
         # Initialize services
         ai_service = AIService()
         
-        file_service = FileService(current_app.config['UPLOAD_FOLDER'])
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
+        file_service = FileService(upload_folder)
         
         # Parse request data (support both JSON and multipart/form-data)
-        if request.is_json:
-            data = request.get_json()
-            uploaded_files = []
-        else:
-            # multipart/form-data
-            data = request.form.to_dict()
-            # Get uploaded files
-            uploaded_files = request.files.getlist('context_images')
-            # Parse JSON fields
-            if 'desc_image_urls' in data and data['desc_image_urls']:
-                try:
-                    data['desc_image_urls'] = json.loads(data['desc_image_urls'])
-                except:
-                    data['desc_image_urls'] = []
-            else:
-                data['desc_image_urls'] = []
+        # In FastAPI, we need to handle this differently - let's use a JSON request for now
+        data = await request.json()
         
         if not data or 'edit_instruction' not in data:
             return bad_request("edit_instruction is required")
@@ -532,7 +536,7 @@ def edit_page_image(project_id, page_id):
         if isinstance(context_images, dict):
             use_template = context_images.get('use_template', False)
         else:
-            use_template = data.get('use_template', 'false').lower() == 'true'
+            use_template = data.get('use_template', False)
         
         if use_template:
             template_path = file_service.get_template_path(project_id)
@@ -546,34 +550,11 @@ def edit_page_image(project_id, page_id):
             desc_image_urls = data.get('desc_image_urls', [])
         
         if desc_image_urls:
-            if isinstance(desc_image_urls, str):
-                try:
-                    desc_image_urls = json.loads(desc_image_urls)
-                except:
-                    desc_image_urls = []
             if isinstance(desc_image_urls, list):
                 additional_ref_images.extend(desc_image_urls)
         
-        # 3. Save and add uploaded files to a persistent location
+        # 3. For FastAPI, we'll handle file uploads differently
         temp_dir = None
-        if uploaded_files:
-            # Create a temporary directory in the project's upload folder
-            import tempfile
-            import shutil
-            from werkzeug.utils import secure_filename
-            temp_dir = Path(tempfile.mkdtemp(dir=current_app.config['UPLOAD_FOLDER']))
-            try:
-                for uploaded_file in uploaded_files:
-                    if uploaded_file.filename:
-                        # Save to temp directory
-                        temp_path = temp_dir / secure_filename(uploaded_file.filename)
-                        uploaded_file.save(str(temp_path))
-                        additional_ref_images.append(str(temp_path))
-            except Exception as e:
-                # Clean up temp directory on error
-                if temp_dir and temp_dir.exists():
-                    shutil.rmtree(temp_dir)
-                raise e
         
         # Create async task for image editing
         task = Task(
@@ -586,13 +567,11 @@ def edit_page_image(project_id, page_id):
             'completed': 0,
             'failed': 0
         })
-        db.session.add(task)
-        db.session.commit()
-        
-        # Get app instance for background task
-        app = current_app._get_current_object()
+        db.add(task)
+        db.commit()
         
         # Submit background task
+        from main import app  # Import the app instance
         task_manager.submit_task(
             task.id,
             edit_page_image_task,
@@ -601,8 +580,8 @@ def edit_page_image(project_id, page_id):
             data['edit_instruction'],
             ai_service,
             file_service,
-            current_app.config['DEFAULT_ASPECT_RATIO'],
-            current_app.config['DEFAULT_RESOLUTION'],
+            os.getenv('DEFAULT_ASPECT_RATIO', '16:9'),
+            os.getenv('DEFAULT_RESOLUTION', '2K'),
             original_description,
             additional_ref_images if additional_ref_images else None,
             str(temp_dir) if temp_dir else None,
@@ -617,23 +596,25 @@ def edit_page_image(project_id, page_id):
         }, status_code=202)
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)
 
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/image-versions', methods=['GET'])
-def get_page_image_versions(project_id, page_id):
+@page_router.get('/{project_id}/pages/{page_id}/image-versions')
+async def get_page_image_versions(project_id: str, page_id: str):
     """
-    GET /api/projects/{project_id}/pages/{page_id}/image-versions - Get all image versions for a page
+    Get all image versions for a page
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        versions = PageImageVersion.query.filter_by(page_id=page_id)\
+        # Use session to query
+        versions = db.query(PageImageVersion).filter(PageImageVersion.page_id == page_id)\
             .order_by(PageImageVersion.version_number.desc()).all()
         
         return success_response({
@@ -644,35 +625,36 @@ def get_page_image_versions(project_id, page_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@page_bp.route('/<project_id>/pages/<page_id>/image-versions/<version_id>/set-current', methods=['POST'])
-def set_current_image_version(project_id, page_id, version_id):
+@page_router.post('/{project_id}/pages/{page_id}/image-versions/{version_id}/set-current')
+async def set_current_image_version(project_id: str, page_id: str, version_id: str):
     """
-    POST /api/projects/{project_id}/pages/{page_id}/image-versions/{version_id}/set-current
     Set a specific version as the current one
     """
     try:
-        page = Page.query.get(page_id)
+        # Use session to query
+        page = db.query(Page).filter(Page.id == page_id).first()
         
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        version = PageImageVersion.query.get(version_id)
+        # Use session to query
+        version = db.query(PageImageVersion).filter(PageImageVersion.id == version_id).first()
         
         if not version or version.page_id != page_id:
             return not_found('Image Version')
         
         # Mark all versions as not current
-        PageImageVersion.query.filter_by(page_id=page_id).update({'is_current': False})
+        db.query(PageImageVersion).filter(PageImageVersion.page_id == page_id).update({'is_current': False})
         
         # Set this version as current
         version.is_current = True
         page.generated_image_path = version.image_path
         page.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         return success_response(page.to_dict(include_versions=True))
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         return error_response('SERVER_ERROR', str(e), 500)

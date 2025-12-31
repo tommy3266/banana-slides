@@ -2,8 +2,9 @@
 Project Controller - handles project-related endpoints
 """
 import logging
-from flask import Blueprint, request, jsonify, current_app
-from werkzeug.exceptions import BadRequest
+import os
+from fastapi import APIRouter, Request, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import JSONResponse
 from models import db, Project, Page, Task, ReferenceFile
 from utils import success_response, error_response, not_found, bad_request
 from services import AIService, ProjectContext
@@ -14,7 +15,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-project_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
+project_router = APIRouter()
 
 
 def _get_project_reference_files_content(project_id: str) -> list:
@@ -27,9 +28,10 @@ def _get_project_reference_files_content(project_id: str) -> list:
     Returns:
         List of dicts with 'filename' and 'content' keys
     """
-    reference_files = ReferenceFile.query.filter_by(
-        project_id=project_id,
-        parse_status='completed'
+    # Use session to query
+    reference_files = db.query(ReferenceFile).filter(
+        ReferenceFile.project_id == project_id,
+        ReferenceFile.parse_status == 'completed'
     ).all()
     
     files_content = []
@@ -102,10 +104,10 @@ def _reconstruct_outline_from_pages(pages: list) -> list:
     return outline
 
 
-@project_bp.route('', methods=['GET'])
-def list_projects():
+@project_router.get('')
+async def list_projects(request: Request):
     """
-    GET /api/projects - Get all projects (for history)
+    Get all projects (for history)
     
     Query params:
     - limit: number of projects to return (default: 50)
@@ -114,15 +116,17 @@ def list_projects():
     try:
         from sqlalchemy import desc
         
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        # Extract query parameters from request
+        query_params = dict(request.query_params)
+        limit = int(query_params.get('limit', 50))
+        offset = int(query_params.get('offset', 0))
         
-        # Get projects ordered by updated_at descending
-        projects = Project.query.order_by(desc(Project.updated_at)).limit(limit).offset(offset).all()
+        # Use session to query
+        projects = db.query(Project).order_by(desc(Project.updated_at)).limit(limit).offset(offset).all()
         
         return success_response({
             'projects': [project.to_dict(include_pages=True) for project in projects],
-            'total': Project.query.count()
+            'total': db.query(Project).count()
         })
     
     except Exception as e:
@@ -130,10 +134,10 @@ def list_projects():
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('', methods=['POST'])
-def create_project():
+@project_router.post('')
+async def create_project(request: Request):
     """
-    POST /api/projects - Create a new project
+    Create a new project
     
     Request body:
     {
@@ -145,7 +149,7 @@ def create_project():
     }
     """
     try:
-        data = request.get_json()
+        data = await request.json()
         
         if not data:
             return bad_request("Request body is required")
@@ -169,8 +173,8 @@ def create_project():
             status='DRAFT'
         )
         
-        db.session.add(project)
-        db.session.commit()
+        db.add(project)
+        db.commit()
         
         return success_response({
             'project_id': project.id,
@@ -178,26 +182,21 @@ def create_project():
             'pages': []
         }, status_code=201)
     
-    except BadRequest as e:
-        # Handle JSON parsing errors (invalid JSON body)
-        db.session.rollback()
-        logger.warning(f"create_project: Invalid JSON body - {str(e)}")
-        return bad_request("Invalid JSON in request body")
-    
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         error_trace = traceback.format_exc()
         logger.error(f"create_project failed: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>', methods=['GET'])
-def get_project(project_id):
+@project_router.get('/{project_id}')
+async def get_project(project_id: str):
     """
-    GET /api/projects/{project_id} - Get project details
+    Get project details
     """
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
@@ -209,10 +208,10 @@ def get_project(project_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>', methods=['PUT'])
-def update_project(project_id):
+@project_router.put('/{project_id}')
+async def update_project(project_id: str, request: Request):
     """
-    PUT /api/projects/{project_id} - Update project
+    Update project
     
     Request body:
     {
@@ -221,12 +220,13 @@ def update_project(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
         
-        data = request.get_json()
+        data = await request.json()
         
         # Update idea_prompt if provided
         if 'idea_prompt' in data:
@@ -244,53 +244,56 @@ def update_project(project_id):
         if 'pages_order' in data:
             pages_order = data['pages_order']
             for index, page_id in enumerate(pages_order):
-                page = Page.query.get(page_id)
+                # Use session to query
+                page = db.query(Page).filter(Page.id == page_id).first()
                 if page and page.project_id == project_id:
                     page.order_index = index
         
         project.updated_at = datetime.utcnow()
-        db.session.commit()
+        db.commit()
         
         return success_response(project.to_dict(include_pages=True))
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"update_project failed: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>', methods=['DELETE'])
-def delete_project(project_id):
+@project_router.delete('/{project_id}')
+async def delete_project(project_id: str):
     """
-    DELETE /api/projects/{project_id} - Delete project
+    Delete project
     """
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
         
         # Delete project files
         from services import FileService
-        file_service = FileService(current_app.config['UPLOAD_FOLDER'])
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
+        file_service = FileService(upload_folder)
         file_service.delete_project_files(project_id)
         
         # Delete project from database (cascade will delete pages and tasks)
-        db.session.delete(project)
-        db.session.commit()
+        db.delete(project)
+        db.commit()
         
         return success_response(message="Project deleted successfully")
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"delete_project failed: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>/generate/outline', methods=['POST'])
-def generate_outline(project_id):
+@project_router.post('/{project_id}/generate/outline')
+async def generate_outline(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/generate/outline - Generate outline
+    Generate outline
     
     For 'idea' type: Generate outline from idea_prompt
     For 'outline' type: Parse outline_text into structured format
@@ -302,7 +305,8 @@ def generate_outline(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
@@ -311,8 +315,8 @@ def generate_outline(project_id):
         ai_service = AIService()
         
         # Get request data and language parameter
-        data = request.get_json() or {}
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        data = await request.json() or {}
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)
@@ -336,7 +340,7 @@ def generate_outline(project_id):
             # 从描述生成：这个类型应该使用专门的端点
             return bad_request("Use /generate/from-description endpoint for descriptions type")
         else:
-            # 一句话生成：从idea生成大纲
+            # 一口气生成：从idea生成大纲
             idea_prompt = data.get('idea_prompt') or project.idea_prompt
             
             if not idea_prompt:
@@ -352,9 +356,10 @@ def generate_outline(project_id):
         pages_data = ai_service.flatten_outline(outline)
         
         # Delete existing pages (using ORM session to trigger cascades)
-        old_pages = Page.query.filter_by(project_id=project_id).all()
+        # Use session to query
+        old_pages = db.query(Page).filter(Page.project_id == project_id).all()
         for old_page in old_pages:
-            db.session.delete(old_page)
+            db.delete(old_page)
         
         # Create pages from outline
         pages_list = []
@@ -370,14 +375,14 @@ def generate_outline(project_id):
                 'points': page_data.get('points', [])
             })
             
-            db.session.add(page)
+            db.add(page)
             pages_list.append(page)
         
         # Update project status
         project.status = 'OUTLINE_GENERATED'
         project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         logger.info(f"大纲生成完成: 项目 {project_id}, 创建了 {len(pages_list)} 个页面")
         
@@ -387,15 +392,15 @@ def generate_outline(project_id):
         })
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"generate_outline failed: {str(e)}", exc_info=True)
         return error_response('AI_SERVICE_ERROR', str(e), 503)
 
 
-@project_bp.route('/<project_id>/generate/from-description', methods=['POST'])
-def generate_from_description(project_id):
+@project_router.post('/{project_id}/generate/from-description')
+async def generate_from_description(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/generate/from-description - Generate outline and page descriptions from description text
+    Generate outline and page descriptions from description text
     
     This endpoint:
     1. Parses the description_text to extract outline structure
@@ -411,7 +416,8 @@ def generate_from_description(project_id):
     """
     
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
@@ -420,9 +426,9 @@ def generate_from_description(project_id):
             return bad_request("This endpoint is only for descriptions type projects")
         
         # Get description text and language
-        data = request.get_json() or {}
+        data = await request.json() or {}
         description_text = data.get('description_text') or project.description_text
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         if not description_text:
             return bad_request("description_text is required")
@@ -459,9 +465,10 @@ def generate_from_description(project_id):
             page_descriptions = page_descriptions[:min_count]
         
         # Step 4: Delete existing pages (using ORM session to trigger cascades)
-        old_pages = Page.query.filter_by(project_id=project_id).all()
+        # Use session to query
+        old_pages = db.query(Page).filter(Page.project_id == project_id).all()
         for old_page in old_pages:
-            db.session.delete(old_page)
+            db.delete(old_page)
         
         # Step 5: Create pages with both outline and description
         pages_list = []
@@ -486,14 +493,14 @@ def generate_from_description(project_id):
             }
             page.set_description_content(desc_content)
             
-            db.session.add(page)
+            db.add(page)
             pages_list.append(page)
         
         # Update project status
         project.status = 'DESCRIPTIONS_GENERATED'
         project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         logger.info(f"从描述生成完成: 项目 {project_id}, 创建了 {len(pages_list)} 个页面，已填充大纲和描述")
         
@@ -504,15 +511,15 @@ def generate_from_description(project_id):
         })
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"generate_from_description failed: {str(e)}", exc_info=True)
         return error_response('AI_SERVICE_ERROR', str(e), 503)
 
 
-@project_bp.route('/<project_id>/generate/descriptions', methods=['POST'])
-def generate_descriptions(project_id):
+@project_router.post('/{project_id}/generate/descriptions')
+async def generate_descriptions(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/generate/descriptions - Generate descriptions
+    Generate descriptions
     
     Request body:
     {
@@ -521,7 +528,8 @@ def generate_descriptions(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        # Use session to query
+        project = db.query(Project).filter(Project.id == project_id).first()
         
         if not project:
             return not_found('Project')
@@ -530,10 +538,11 @@ def generate_descriptions(project_id):
             return bad_request("Project must have outline generated first")
         
         # IMPORTANT: Expire cached objects to ensure fresh data
-        db.session.expire_all()
+        db.expire_all()
         
         # Get pages
-        pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        # Use session to query
+        pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         
         if not pages:
             return bad_request("No pages found for project")
@@ -541,10 +550,10 @@ def generate_descriptions(project_id):
         # Reconstruct outline from pages with part structure
         outline = _reconstruct_outline_from_pages(pages)
         
-        data = request.get_json() or {}
+        data = await request.json() or {}
         # 从配置中读取默认并发数，如果请求中提供了则使用请求的值
-        max_workers = data.get('max_workers', current_app.config.get('MAX_DESCRIPTION_WORKERS', 5))
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        max_workers = data.get('max_workers', int(os.getenv('MAX_DESCRIPTION_WORKERS', '5')))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Create task
         task = Task(
@@ -558,8 +567,8 @@ def generate_descriptions(project_id):
             'failed': 0
         })
         
-        db.session.add(task)
-        db.session.commit()
+        db.add(task)
+        db.commit()
         
         # Initialize AI service
         ai_service = AIService()
@@ -568,10 +577,10 @@ def generate_descriptions(project_id):
         reference_files_content = _get_project_reference_files_content(project_id)
         project_context = ProjectContext(project, reference_files_content)
         
-        # Get app instance for background task
-        app = current_app._get_current_object()
-        
         # Submit background task
+        # Note: For FastAPI, we may need to adjust how we handle background tasks
+        # For now, we'll pass the current app context
+        from main import app  # Import the app instance
         task_manager.submit_task(
             task.id,
             generate_descriptions_task,
@@ -586,7 +595,7 @@ def generate_descriptions(project_id):
         
         # Update project status
         project.status = 'GENERATING_DESCRIPTIONS'
-        db.session.commit()
+        db.commit()
         
         return success_response({
             'task_id': task.id,
@@ -595,15 +604,15 @@ def generate_descriptions(project_id):
         }, status_code=202)
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"generate_descriptions failed: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>/generate/images', methods=['POST'])
-def generate_images(project_id):
+@project_router.post('/{project_id}/generate/images')
+async def generate_images(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/generate/images - Generate images
+    Generate images
     
     Request body:
     {
@@ -613,7 +622,7 @@ def generate_images(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = db.get(Project, project_id)
         
         if not project:
             return not_found('Project')
@@ -622,10 +631,10 @@ def generate_images(project_id):
         #     return bad_request("Project must have descriptions generated first")
         
         # IMPORTANT: Expire cached objects to ensure fresh data
-        db.session.expire_all()
+        db.expire_all()
         
         # Get pages
-        pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         
         if not pages:
             return bad_request("No pages found for project")
@@ -633,11 +642,11 @@ def generate_images(project_id):
         # Reconstruct outline from pages with part structure
         outline = _reconstruct_outline_from_pages(pages)
         
-        data = request.get_json() or {}
+        data = await request.json() or {}
         # 从配置中读取默认并发数，如果请求中提供了则使用请求的值
-        max_workers = data.get('max_workers', current_app.config.get('MAX_IMAGE_WORKERS', 8))
+        max_workers = data.get('max_workers', int(os.getenv('MAX_IMAGE_WORKERS', '8')))
         use_template = data.get('use_template', True)
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Create task
         task = Task(
@@ -651,14 +660,15 @@ def generate_images(project_id):
             'failed': 0
         })
         
-        db.session.add(task)
-        db.session.commit()
+        db.add(task)
+        db.commit()
         
         # Initialize services
         ai_service = AIService()
         
         from services import FileService
-        file_service = FileService(current_app.config['UPLOAD_FOLDER'])
+        upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
+        file_service = FileService(upload_folder)
         
         # 合并额外要求和风格描述
         combined_requirements = project.extra_requirements or ""
@@ -666,10 +676,8 @@ def generate_images(project_id):
             style_requirement = f"\n\nppt页面风格描述：\n\n{project.template_style}"
             combined_requirements = combined_requirements + style_requirement
         
-        # Get app instance for background task
-        app = current_app._get_current_object()
-        
         # Submit background task
+        from main import app  # Import the app instance
         task_manager.submit_task(
             task.id,
             generate_images_task,
@@ -679,8 +687,8 @@ def generate_images(project_id):
             outline,
             use_template,
             max_workers,
-            current_app.config['DEFAULT_ASPECT_RATIO'],
-            current_app.config['DEFAULT_RESOLUTION'],
+            os.getenv('DEFAULT_ASPECT_RATIO', '16:9'),
+            os.getenv('DEFAULT_RESOLUTION', '2K'),
             app,
             combined_requirements if combined_requirements.strip() else None,
             language
@@ -688,7 +696,7 @@ def generate_images(project_id):
         
         # Update project status
         project.status = 'GENERATING_IMAGES'
-        db.session.commit()
+        db.commit()
         
         return success_response({
             'task_id': task.id,
@@ -697,18 +705,18 @@ def generate_images(project_id):
         }, status_code=202)
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"generate_images failed: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>/tasks/<task_id>', methods=['GET'])
-def get_task_status(project_id, task_id):
+@project_router.get('/{project_id}/tasks/{task_id}')
+async def get_task_status(project_id: str, task_id: str):
     """
-    GET /api/projects/{project_id}/tasks/{task_id} - Get task status
+    Get task status
     """
     try:
-        task = Task.query.get(task_id)
+        task = db.get(Task, task_id)
         
         if not task or task.project_id != project_id:
             return not_found('Task')
@@ -720,10 +728,10 @@ def get_task_status(project_id, task_id):
         return error_response('SERVER_ERROR', str(e), 500)
 
 
-@project_bp.route('/<project_id>/refine/outline', methods=['POST'])
-def refine_outline(project_id):
+@project_router.post('/{project_id}/refine/outline')
+async def refine_outline(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/refine/outline - Refine outline based on user requirements
+    Refine outline based on user requirements
     
     Request body:
     {
@@ -732,12 +740,12 @@ def refine_outline(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = db.get(Project, project_id)
         
         if not project:
             return not_found('Project')
         
-        data = request.get_json()
+        data = await request.json()
         
         if not data or not data.get('user_requirement'):
             return bad_request("user_requirement is required")
@@ -746,10 +754,10 @@ def refine_outline(project_id):
         
         # IMPORTANT: Expire all cached objects to ensure we get fresh data from database
         # This prevents issues when multiple refine operations are called in sequence
-        db.session.expire_all()
+        db.expire_all()
         
         # Get current outline from pages
-        pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         
         # Reconstruct current outline from pages (如果没有页面，使用空列表)
         if not pages:
@@ -774,7 +782,7 @@ def refine_outline(project_id):
         
         # Get previous requirements and language from request
         previous_requirements = data.get('previous_requirements', [])
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Refine outline
         logger.info(f"开始修改大纲: 项目 {project_id}, 用户要求: {user_requirement}, 历史要求数: {len(previous_requirements)}")
@@ -790,7 +798,7 @@ def refine_outline(project_id):
         pages_data = ai_service.flatten_outline(refined_outline)
         
         # 在删除旧页面之前，先保存已有的页面描述（按标题匹配）
-        old_pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        old_pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         descriptions_map = {}  # {title: description_content}
         old_status_map = {}  # {title: status} 用于保留状态
         
@@ -806,7 +814,7 @@ def refine_outline(project_id):
         
         # Delete existing pages (using ORM session to trigger cascades)
         for old_page in old_pages:
-            db.session.delete(old_page)
+            db.delete(old_page)
         
         # Create pages from refined outline
         pages_list = []
@@ -844,7 +852,7 @@ def refine_outline(project_id):
                 page.status = 'DRAFT'
                 new_count += 1
             
-            db.session.add(page)
+            db.add(page)
             pages_list.append(page)
         
         logger.info(f"描述匹配完成: 保留了 {preserved_count} 个页面的描述, {new_count} 个页面需要重新生成描述")
@@ -858,7 +866,7 @@ def refine_outline(project_id):
             project.status = 'OUTLINE_GENERATED'
         project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         logger.info(f"大纲修改完成: 项目 {project_id}, 创建了 {len(pages_list)} 个页面")
         
@@ -869,15 +877,15 @@ def refine_outline(project_id):
         })
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"refine_outline failed: {str(e)}", exc_info=True)
         return error_response('AI_SERVICE_ERROR', str(e), 503)
 
 
-@project_bp.route('/<project_id>/refine/descriptions', methods=['POST'])
-def refine_descriptions(project_id):
+@project_router.post('/{project_id}/refine/descriptions')
+async def refine_descriptions(project_id: str, request: Request):
     """
-    POST /api/projects/{project_id}/refine/descriptions - Refine page descriptions based on user requirements
+    Refine page descriptions based on user requirements
     
     Request body:
     {
@@ -886,22 +894,22 @@ def refine_descriptions(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = db.get(Project, project_id)
         
         if not project:
             return not_found('Project')
         
-        data = request.get_json()
+        data = await request.json()
         
         if not data or not data.get('user_requirement'):
             return bad_request("user_requirement is required")
         
         user_requirement = data['user_requirement']
         
-        db.session.expire_all()
+        db.expire_all()
         
         # Get current pages
-        pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
         
         if not pages:
             logger.info(f"项目 {project_id} 当前没有页面，无法修改描述")
@@ -943,10 +951,10 @@ def refine_descriptions(project_id):
         
         # Get previous requirements and language from request
         previous_requirements = data.get('previous_requirements', [])
-        language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
         
         # Refine descriptions
-        logger.info(f"开始修改页面描述: 项目 {project_id}, 用户要求: {user_requirement}, 历史要求数: {len(previous_requirements)}")
+        logger.info(f"开始修改页面描述: 项目 {project_id}, 用户要求: {user_requirement}, 历史要も数: {len(previous_requirements)}")
         refined_descriptions = ai_service.refine_descriptions(
             current_descriptions=current_descriptions,
             user_requirement=user_requirement,
@@ -978,11 +986,13 @@ def refine_descriptions(project_id):
             page.set_description_content(desc_content)
             page.status = 'DESCRIPTION_GENERATED'
         
+        db.commit()
+        
         # Update project status
         project.status = 'DESCRIPTIONS_GENERATED'
         project.updated_at = datetime.utcnow()
         
-        db.session.commit()
+        db.commit()
         
         logger.info(f"页面描述修改完成: 项目 {project_id}, 更新了 {len(pages)} 个页面")
         
@@ -993,6 +1003,33 @@ def refine_descriptions(project_id):
         })
     
     except Exception as e:
-        db.session.rollback()
+        db.rollback()
         logger.error(f"refine_descriptions failed: {str(e)}", exc_info=True)
         return error_response('AI_SERVICE_ERROR', str(e), 503)
+
+
+@project_router.get('/{project_id}/materials')
+async def get_project_materials(project_id: str):
+    """
+    Get materials for a specific project
+    This endpoint matches the frontend request to /api/projects/{project_id}/materials
+    """
+    try:
+        # Import here to avoid circular imports
+        from models import Material
+        
+        # Query materials for this project
+        materials = db.query(Material).filter(
+            Material.project_id == project_id
+        ).order_by(Material.created_at.desc()).all()
+        
+        materials_list = [material.to_dict() for material in materials]
+        
+        return success_response({
+            "materials": materials_list,
+            "count": len(materials_list)
+        })
+    
+    except Exception as e:
+        logger.error(f"get_project_materials failed: {str(e)}", exc_info=True)
+        return error_response('SERVER_ERROR', str(e), 500)

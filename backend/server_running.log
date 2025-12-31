@@ -22,7 +22,7 @@ Press CTRL+C to quit
 127.0.0.1 - - [30/Nov/2025 03:18:39] "GET /health HTTP/1.1" 200 -
 127.0.0.1 - - [30/Nov/2025 03:18:39] "GET /health HTTP/1.1" 200 -
 127.0.0.1 - - [30/Nov/2025 03:18:39] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [30/Nov/2025 03:18:39] "POST /api/projects HTTP/1.1" 201 -
+127.0.0.1 - - [30/Nov/2025 03:18:39] "POST /s HTTP/1.1" 201 -
 127.0.0.1 - - [30/Nov/2025 03:18:39] "GET /api/projects/81632cd2-b693-49df-ba50-632a6753bf2b HTTP/1.1" 200 -
 127.0.0.1 - - [30/Nov/2025 03:18:39] "PUT /api/projects/81632cd2-b693-49df-ba50-632a6753bf2b HTTP/1.1" 200 -
 127.0.0.1 - - [30/Nov/2025 03:18:40] "POST /api/projects/81632cd2-b693-49df-ba50-632a6753bf2b/template HTTP/1.1" 200 -

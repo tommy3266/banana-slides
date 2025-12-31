@@ -2,7 +2,8 @@ import axios from 'axios';
 
 // 开发环境：通过 Vite proxy 转发
 // 生产环境：通过 nginx proxy 转发
-const API_BASE_URL = '';
+// const API_BASE_URL = '';
+const API_BASE_URL = 'http://localhost:5001';
 
 // 创建 axios 实例
 export const apiClient = axios.create({

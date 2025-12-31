@@ -3,33 +3,35 @@ Project model
 """
 import uuid
 from datetime import datetime
-from . import db
+from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy.orm import relationship
+from . import Base
 
 
-class Project(db.Model):
+class Project(Base):
     """
     Project model - represents a PPT project
     """
     __tablename__ = 'projects'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    idea_prompt = db.Column(db.Text, nullable=True)
-    outline_text = db.Column(db.Text, nullable=True)  # 用户输入的大纲文本（用于outline类型）
-    description_text = db.Column(db.Text, nullable=True)  # 用户输入的描述文本（用于description类型）
-    extra_requirements = db.Column(db.Text, nullable=True)  # 额外要求，应用到每个页面的AI提示词
-    creation_type = db.Column(db.String(20), nullable=False, default='idea')  # idea|outline|descriptions
-    template_image_path = db.Column(db.String(500), nullable=True)
-    template_style = db.Column(db.Text, nullable=True)  # 风格描述文本（无模板模式）
-    status = db.Column(db.String(50), nullable=False, default='DRAFT')
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    idea_prompt = Column(Text, nullable=True)
+    outline_text = Column(Text, nullable=True)  # 用户输入的大纲文本（用于outline类型）
+    description_text = Column(Text, nullable=True)  # 用户输入的描述文本（用于description类型）
+    extra_requirements = Column(Text, nullable=True)  # 额外要求，应用到每个页面的AI提示词
+    creation_type = Column(String(20), nullable=False, default='idea')  # idea|outline|descriptions
+    template_image_path = Column(String(500), nullable=True)
+    template_style = Column(Text, nullable=True)  # 风格描述文本（无模板模式）
+    status = Column(String(50), nullable=False, default='DRAFT')
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    pages = db.relationship('Page', back_populates='project', lazy='dynamic', 
+    pages = relationship('Page', back_populates='project', lazy='dynamic', 
                            cascade='all, delete-orphan', order_by='Page.order_index')
-    tasks = db.relationship('Task', back_populates='project', lazy='dynamic',
+    tasks = relationship('Task', back_populates='project', lazy='dynamic',
                            cascade='all, delete-orphan')
-    materials = db.relationship('Material', back_populates='project', lazy='dynamic',
+    materials = relationship('Material', back_populates='project', lazy='dynamic',
                            cascade='all, delete-orphan')
     
     def to_dict(self, include_pages=False):
@@ -64,4 +66,3 @@ class Project(db.Model):
     
     def __repr__(self):
         return f'<Project {self.id}: {self.status}>'
-
