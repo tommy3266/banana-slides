@@ -550,6 +550,25 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                 prompt, ref_image_path, aspect_ratio, resolution,
                 additional_ref_images=additional_ref_images if additional_ref_images else None
             )
+
+            # from openai import OpenAI
+            # import os
+            # client = OpenAI(
+            #     # 此为默认路径，您可根据业务所在地域进行配置
+            #     base_url="https://ark.cn-beijing.volces.com/api/v3",
+            #     # 从环境变量中获取您的 API Key。此为默认方式，您可根据需要进行修改
+            #     api_key="24f7baed-9d44-492f-b6b7-8369cdfc0db6",
+            # )
+            #
+            # image = client.images.generate(
+            #     model="ep-20251230135756-cpv8t",
+            #     prompt=prompt,
+            #     size="2K",
+            #     response_format="url",
+            #     extra_body={
+            #         "watermark": True,
+            #     },
+            # )
             
             if not image:
                 raise ValueError("Failed to generate image")

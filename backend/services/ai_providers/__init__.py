@@ -32,6 +32,9 @@ from typing import Dict, Any
 from .text import TextProvider, GenAITextProvider, OpenAITextProvider
 from .image import ImageProvider, GenAIImageProvider, OpenAIImageProvider
 
+from openai import OpenAI
+
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
