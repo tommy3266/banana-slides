@@ -1,0 +1,116 @@
+Index: .gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>*.png\r\n*.jpg\r\n*.jpeg\r\n*.gif\r\n*.bmp\r\n*.svg\r\n*.webp\r\n*.ico\r\n*.tiff\r\n*.tif\r\n*.heic\r\n*.heif\r\n*.avif\r\n\r\n!frontend/public/**/*.png\r\n!frontend/public/**/*.jpg\r\n!frontend/public/**/*.jpeg\r\n!frontend/public/**/*.gif\r\n!frontend/public/**/*.bmp\r\n!frontend/public/**/*.svg\r\n!frontend/public/**/*.webp\r\n!frontend/public/**/*.ico\r\n!frontend/public/**/*.tiff\r\n!frontend/public/**/*.tif\r\n!frontend/public/**/*.heic\r\n!frontend/public/**/*.heif\r\n!frontend/public/**/*.avif\r\n\r\n# 保留测试fixtures\r\n!e2e/fixtures/*.png\r\n\r\n# 保留项目模板图片\r\n!template*.png\r\n\r\n# 忽略临时文档，但保留项目文档\r\n*.md\r\n!README*.md\r\n!docs/**/*.md\r\n!.github/**/*.md\r\n*.pyc\r\n.env\r\n\r\n# GCP 服务账户文件（包含敏感私钥）\r\ngcp-service-account.json\r\n*.ppt\r\n*.pptx\r\ngenerate-example.py\r\n*.mdc\r\n*.pdf\r\n.cursor/worktrees.json\r\nuploads/\r\n!assets/*\r\n\r\n# 镜像源配置脚本的备份文件\r\n*.orig
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.gitignore b/.gitignore
+--- a/.gitignore	(revision c159df1c74dfcc55ac2db8f048d8e5571da5eb3d)
++++ b/.gitignore	(date 1767188180993)
+@@ -52,4 +52,5 @@
+ !assets/*
+ 
+ # 镜像源配置脚本的备份文件
+-*.orig
+\ No newline at end of file
++*.orig
++.venv
+\ No newline at end of file
+Index: .idea/banana-slides.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/banana-slides.iml b/.idea/banana-slides.iml
+new file mode 100644
+--- /dev/null	(date 1767186945080)
++++ b/.idea/banana-slides.iml	(date 1767186945080)
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module version="4">
++  <component name="PyDocumentationSettings">
++    <option name="format" value="PLAIN" />
++    <option name="myDocStringFormat" value="Plain" />
++  </component>
++  <component name="TemplatesService">
++    <option name="TEMPLATE_FOLDERS">
++      <list>
++        <option value="$MODULE_DIR$/frontend/public/templates" />
++      </list>
++    </option>
++  </component>
++  <component name="TestRunnerService">
++    <option name="PROJECT_TEST_RUNNER" value="py.test" />
++  </component>
++</module>
+\ No newline at end of file
+Index: .idea/misc.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/misc.xml b/.idea/misc.xml
+new file mode 100644
+--- /dev/null	(date 1767188922837)
++++ b/.idea/misc.xml	(date 1767188922837)
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="Black">
++    <option name="sdkName" value="Python 3.10 (banana-slides)" />
++  </component>
++  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.10 (2)" project-jdk-type="Python SDK" />
++</project>
+\ No newline at end of file
+Index: .idea/vcs.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/vcs.xml b/.idea/vcs.xml
+new file mode 100644
+--- /dev/null	(date 1767186945092)
++++ b/.idea/vcs.xml	(date 1767186945092)
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="VcsDirectoryMappings">
++    <mapping directory="" vcs="Git" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/inspectionProfiles/profiles_settings.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/inspectionProfiles/profiles_settings.xml b/.idea/inspectionProfiles/profiles_settings.xml
+new file mode 100644
+--- /dev/null	(date 1767186945089)
++++ b/.idea/inspectionProfiles/profiles_settings.xml	(date 1767186945089)
+@@ -0,0 +1,6 @@
++<component name="InspectionProjectProfileManager">
++  <settings>
++    <option name="USE_PROJECT_PROFILE" value="false" />
++    <version value="1.0" />
++  </settings>
++</component>
+\ No newline at end of file
+Index: .idea/inspectionProfiles/Project_Default.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/inspectionProfiles/Project_Default.xml b/.idea/inspectionProfiles/Project_Default.xml
+new file mode 100644
+--- /dev/null	(date 1767186945065)
++++ b/.idea/inspectionProfiles/Project_Default.xml	(date 1767186945065)
+@@ -0,0 +1,6 @@
++<component name="InspectionProjectProfileManager">
++  <profile version="1.0">
++    <option name="myName" value="Project Default" />
++    <inspection_tool class="Eslint" enabled="true" level="WARNING" enabled_by_default="true" />
++  </profile>
++</component>
+\ No newline at end of file
