@@ -123,7 +123,7 @@ def create_app():
     # 修正：项目模板上传应该在项目路由下，而不是独立的模板路由下
     app.include_router(template_router, prefix="/api/projects", tags=["templates"])
     app.include_router(user_template_router, tags=["user-templates"])
-    app.include_router(export_router, prefix="/api/export", tags=["export"])
+    app.include_router(export_router, prefix="/api/projects", tags=["export"])
     app.include_router(file_router, tags=["files"])
     app.include_router(material_router, prefix="/api/materials", tags=["materials"])
     app.include_router(material_global_router, tags=["materials-global"])
