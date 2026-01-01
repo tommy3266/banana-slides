@@ -4,6 +4,7 @@ Page Controller - handles page-related endpoints
 import logging
 from fastapi import APIRouter, Request, UploadFile, File, Form
 from models import db, Project, Page, PageImageVersion, Task
+from models.request_models import CreatePageRequest, UpdatePageOutlineRequest, UpdatePageDescriptionRequest, GeneratePageDescriptionRequest, GeneratePageImageRequest, EditPageImageRequest
 from utils import success_response, error_response, not_found, bad_request
 from services import AIService, FileService, ProjectContext
 from services.task_manager import task_manager, generate_single_page_image_task, edit_page_image_task
@@ -21,7 +22,7 @@ page_router = APIRouter()
 
 
 @page_router.post('/{project_id}/pages')
-async def create_page(project_id: str, request: Request):
+async def create_page(project_id: str, request_data: CreatePageRequest):
     """
     Add new page
     
@@ -39,21 +40,19 @@ async def create_page(project_id: str, request: Request):
         if not project:
             return not_found('Project')
         
-        data = await request.json()
-        
-        if not data or 'order_index' not in data:
+        if request_data.order_index is None:
             return bad_request("order_index is required")
         
         # Create new page
         page = Page(
             project_id=project_id,
-            order_index=data['order_index'],
-            part=data.get('part'),
+            order_index=request_data.order_index,
+            part=request_data.part,
             status='DRAFT'
         )
         
-        if 'outline_content' in data:
-            page.set_outline_content(data['outline_content'])
+        if request_data.outline_content:
+            page.set_outline_content(request_data.outline_content)
         
         db.add(page)
         
@@ -61,7 +60,7 @@ async def create_page(project_id: str, request: Request):
         # Use session to query
         other_pages = db.query(Page).filter(
             Page.project_id == project_id,
-            Page.order_index >= data['order_index']
+            Page.order_index >= request_data.order_index
         ).all()
         
         for p in other_pages:
@@ -114,7 +113,7 @@ async def delete_page(project_id: str, page_id: str):
 
 
 @page_router.put('/{project_id}/pages/{page_id}/outline')
-async def update_page_outline(project_id: str, page_id: str, request: Request):
+async def update_page_outline(project_id: str, page_id: str, request_data: UpdatePageOutlineRequest):
     """
     Edit page outline
     
@@ -130,12 +129,10 @@ async def update_page_outline(project_id: str, page_id: str, request: Request):
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        data = await request.json()
-        
-        if not data or 'outline_content' not in data:
+        if not request_data.outline_content:
             return bad_request("outline_content is required")
         
-        page.set_outline_content(data['outline_content'])
+        page.set_outline_content(request_data.outline_content)
         page.updated_at = datetime.utcnow()
         
         # Update project
@@ -154,7 +151,7 @@ async def update_page_outline(project_id: str, page_id: str, request: Request):
 
 
 @page_router.put('/{project_id}/pages/{page_id}/description')
-async def update_page_description(project_id: str, page_id: str, request: Request):
+async def update_page_description(project_id: str, page_id: str, request_data: UpdatePageDescriptionRequest):
     """
     Edit description
     
@@ -174,12 +171,10 @@ async def update_page_description(project_id: str, page_id: str, request: Reques
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        data = await request.json()
-        
-        if not data or 'description_content' not in data:
+        if not request_data.description_content:
             return bad_request("description_content is required")
         
-        page.set_description_content(data['description_content'])
+        page.set_description_content(request_data.description_content)
         page.updated_at = datetime.utcnow()
         
         # Update project
@@ -198,7 +193,7 @@ async def update_page_description(project_id: str, page_id: str, request: Reques
 
 
 @page_router.post('/{project_id}/pages/{page_id}/generate/description')
-async def generate_page_description(project_id: str, page_id: str, request: Request):
+async def generate_page_description(project_id: str, page_id: str, request_data: GeneratePageDescriptionRequest):
     """
     Generate single page description
     
@@ -219,9 +214,8 @@ async def generate_page_description(project_id: str, page_id: str, request: Requ
         if not project:
             return not_found('Project')
         
-        data = await request.json() or {}
-        force_regenerate = data.get('force_regenerate', False)
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        force_regenerate = request_data.force_regenerate
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
         
         # Check if already generated
         if page.get_description_content() and not force_regenerate:
@@ -285,7 +279,7 @@ async def generate_page_description(project_id: str, page_id: str, request: Requ
 
 
 @page_router.post('/{project_id}/pages/{page_id}/generate/image')
-async def generate_page_image(project_id: str, page_id: str, request: Request):
+async def generate_page_image(project_id: str, page_id: str, request_data: GeneratePageImageRequest):
     """
     Generate single page image
     
@@ -307,10 +301,9 @@ async def generate_page_image(project_id: str, page_id: str, request: Request):
         if not project:
             return not_found('Project')
         
-        data = await request.json() or {}
-        use_template = data.get('use_template', True)
-        force_regenerate = data.get('force_regenerate', False)
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        use_template = request_data.use_template
+        force_regenerate = request_data.force_regenerate
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
         
         # Check if already generated
         if page.generated_image_path and not force_regenerate:
@@ -464,7 +457,7 @@ async def generate_page_image(project_id: str, page_id: str, request: Request):
 
 
 @page_router.post('/{project_id}/pages/{page_id}/edit/image')
-async def edit_page_image(project_id: str, page_id: str, request: Request):
+async def edit_page_image(project_id: str, page_id: str, request_data: EditPageImageRequest):
     """
     Edit page image
     
@@ -499,6 +492,9 @@ async def edit_page_image(project_id: str, page_id: str, request: Request):
         if not project:
             return not_found('Project')
         
+        if not request_data.edit_instruction:
+            return bad_request("edit_instruction is required")
+        
         # Initialize services
         ai_service = AIService()
         
@@ -507,10 +503,8 @@ async def edit_page_image(project_id: str, page_id: str, request: Request):
         
         # Parse request data (support both JSON and multipart/form-data)
         # In FastAPI, we need to handle this differently - let's use a JSON request for now
-        data = await request.json()
         
-        if not data or 'edit_instruction' not in data:
-            return bad_request("edit_instruction is required")
+        data = request_data
         
         # Get current image path
         current_image_path = file_service.get_absolute_path(page.generated_image_path)

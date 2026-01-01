@@ -12,6 +12,10 @@ from services.task_manager import task_manager, generate_descriptions_task, gene
 import json
 import traceback
 from datetime import datetime
+from models.request_models import CreateProjectRequest, UpdateProjectRequest, GenerateOutlineRequest, GenerateFromDescriptionRequest, GenerateDescriptionsRequest, GenerateImagesRequest, RefineOutlineRequest, RefineDescriptionsRequest
+from fastapi import Body
+from typing import Optional
+
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +139,7 @@ async def list_projects(request: Request):
 
 
 @project_router.post('')
-async def create_project(request: Request):
+async def create_project(request_data: CreateProjectRequest):
     """
     Create a new project
     
@@ -149,16 +153,11 @@ async def create_project(request: Request):
     }
     """
     try:
-        data = await request.json()
-        
-        if not data:
-            return bad_request("Request body is required")
-        
         # creation_type is required
-        if 'creation_type' not in data:
+        if not request_data.creation_type:
             return bad_request("creation_type is required")
         
-        creation_type = data.get('creation_type')
+        creation_type = request_data.creation_type
         
         if creation_type not in ['idea', 'outline', 'descriptions']:
             return bad_request("Invalid creation_type")
@@ -166,10 +165,10 @@ async def create_project(request: Request):
         # Create project
         project = Project(
             creation_type=creation_type,
-            idea_prompt=data.get('idea_prompt'),
-            outline_text=data.get('outline_text'),
-            description_text=data.get('description_text'),
-            template_style=data.get('template_style'),
+            idea_prompt=request_data.idea_prompt,
+            outline_text=request_data.outline_text,
+            description_text=request_data.description_text,
+            template_style=request_data.template_style,
             status='DRAFT'
         )
         
@@ -209,7 +208,7 @@ async def get_project(project_id: str):
 
 
 @project_router.put('/{project_id}')
-async def update_project(project_id: str, request: Request):
+async def update_project(project_id: str, request_data: UpdateProjectRequest):
     """
     Update project
     
@@ -226,23 +225,21 @@ async def update_project(project_id: str, request: Request):
         if not project:
             return not_found('Project')
         
-        data = await request.json()
-        
         # Update idea_prompt if provided
-        if 'idea_prompt' in data:
-            project.idea_prompt = data['idea_prompt']
+        if request_data.idea_prompt is not None:
+            project.idea_prompt = request_data.idea_prompt
         
         # Update extra_requirements if provided
-        if 'extra_requirements' in data:
-            project.extra_requirements = data['extra_requirements']
+        if request_data.extra_requirements is not None:
+            project.extra_requirements = request_data.extra_requirements
         
         # Update template_style if provided
-        if 'template_style' in data:
-            project.template_style = data['template_style']
+        if request_data.template_style is not None:
+            project.template_style = request_data.template_style
         
         # Update page order if provided
-        if 'pages_order' in data:
-            pages_order = data['pages_order']
+        if request_data.pages_order is not None:
+            pages_order = request_data.pages_order
             for index, page_id in enumerate(pages_order):
                 # Use session to query
                 page = db.query(Page).filter(Page.id == page_id).first()
@@ -291,7 +288,7 @@ async def delete_project(project_id: str):
 
 
 @project_router.post('/{project_id}/generate/outline')
-async def generate_outline(project_id: str, request: Request):
+async def generate_outline(project_id: str, request_data: GenerateOutlineRequest):
     """
     Generate outline
     
@@ -314,9 +311,11 @@ async def generate_outline(project_id: str, request: Request):
         # Initialize AI service
         ai_service = AIService()
         
-        # Get request data and language parameter
-        data = await request.json() or {}
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        # Get language parameter from request model
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
+        
+        # Initialize AI service
+        ai_service = AIService()
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)
@@ -341,7 +340,7 @@ async def generate_outline(project_id: str, request: Request):
             return bad_request("Use /generate/from-description endpoint for descriptions type")
         else:
             # 一口气生成：从idea生成大纲
-            idea_prompt = data.get('idea_prompt') or project.idea_prompt
+            idea_prompt = request_data.idea_prompt or project.idea_prompt
             
             if not idea_prompt:
                 return bad_request("idea_prompt is required")
@@ -398,7 +397,7 @@ async def generate_outline(project_id: str, request: Request):
 
 
 @project_router.post('/{project_id}/generate/from-description')
-async def generate_from_description(project_id: str, request: Request):
+async def generate_from_description(project_id: str, request_data: GenerateFromDescriptionRequest):
     """
     Generate outline and page descriptions from description text
     
@@ -426,9 +425,8 @@ async def generate_from_description(project_id: str, request: Request):
             return bad_request("This endpoint is only for descriptions type projects")
         
         # Get description text and language
-        data = await request.json() or {}
-        description_text = data.get('description_text') or project.description_text
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        description_text = request_data.description_text or project.description_text
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
         
         if not description_text:
             return bad_request("description_text is required")
@@ -517,7 +515,7 @@ async def generate_from_description(project_id: str, request: Request):
 
 
 @project_router.post('/{project_id}/generate/descriptions')
-async def generate_descriptions(project_id: str, request: Request):
+async def generate_descriptions(project_id: str, request_data: GenerateDescriptionsRequest):
     """
     Generate descriptions
     
@@ -550,10 +548,9 @@ async def generate_descriptions(project_id: str, request: Request):
         # Reconstruct outline from pages with part structure
         outline = _reconstruct_outline_from_pages(pages)
         
-        data = await request.json() or {}
         # 从配置中读取默认并发数，如果请求中提供了则使用请求的值
-        max_workers = data.get('max_workers', int(os.getenv('MAX_DESCRIPTION_WORKERS', '5')))
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        max_workers = request_data.max_workers or int(os.getenv('MAX_DESCRIPTION_WORKERS', '5'))
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
         
         # Create task
         task = Task(
@@ -610,7 +607,7 @@ async def generate_descriptions(project_id: str, request: Request):
 
 
 @project_router.post('/{project_id}/generate/images')
-async def generate_images(project_id: str, request: Request):
+async def generate_images(project_id: str, request_data: GenerateImagesRequest):
     """
     Generate images
     
@@ -629,25 +626,24 @@ async def generate_images(project_id: str, request: Request):
         
         # if project.status not in ['DESCRIPTIONS_GENERATED', 'OUTLINE_GENERATED']:
         #     return bad_request("Project must have descriptions generated first")
-        
+
         # IMPORTANT: Expire cached objects to ensure fresh data
         db.expire_all()
-        
+
         # Get pages
         pages = db.query(Page).filter(Page.project_id == project_id).order_by(Page.order_index).all()
-        
+
         if not pages:
             return bad_request("No pages found for project")
-        
+
         # Reconstruct outline from pages with part structure
         outline = _reconstruct_outline_from_pages(pages)
-        
-        data = await request.json() or {}
+
         # 从配置中读取默认并发数，如果请求中提供了则使用请求的值
-        max_workers = data.get('max_workers', int(os.getenv('MAX_IMAGE_WORKERS', '8')))
-        use_template = data.get('use_template', True)
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
-        
+        max_workers = request_data.max_workers or int(os.getenv('MAX_IMAGE_WORKERS', '8'))
+        use_template = request_data.use_template if request_data.use_template is not None else True
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
+
         # Create task
         task = Task(
             project_id=project_id,
@@ -659,23 +655,23 @@ async def generate_images(project_id: str, request: Request):
             'completed': 0,
             'failed': 0
         })
-        
+
         db.add(task)
         db.commit()
-        
+
         # Initialize services
         ai_service = AIService()
-        
+
         from services import FileService
         upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
         file_service = FileService(upload_folder)
-        
+
         # 合并额外要求和风格描述
         combined_requirements = project.extra_requirements or ""
         if project.template_style:
             style_requirement = f"\n\nppt页面风格描述：\n\n{project.template_style}"
             combined_requirements = combined_requirements + style_requirement
-        
+
         # Submit background task
         from main import app  # Import the app instance
         task_manager.submit_task(
@@ -693,17 +689,16 @@ async def generate_images(project_id: str, request: Request):
             combined_requirements if combined_requirements.strip() else None,
             language
         )
-        
+
         # Update project status
         project.status = 'GENERATING_IMAGES'
         db.commit()
-        
+
         return success_response({
             'task_id': task.id,
             'status': 'GENERATING_IMAGES',
             'total_pages': len(pages)
         }, status_code=202)
-    
     except Exception as e:
         db.rollback()
         logger.error(f"generate_images failed: {str(e)}", exc_info=True)
@@ -729,7 +724,7 @@ async def get_task_status(project_id: str, task_id: str):
 
 
 @project_router.post('/{project_id}/refine/outline')
-async def refine_outline(project_id: str, request: Request):
+async def refine_outline(project_id: str, request_data: RefineOutlineRequest):
     """
     Refine outline based on user requirements
     
@@ -745,12 +740,10 @@ async def refine_outline(project_id: str, request: Request):
         if not project:
             return not_found('Project')
         
-        data = await request.json()
-        
-        if not data or not data.get('user_requirement'):
+        if not request_data.user_requirement:
             return bad_request("user_requirement is required")
         
-        user_requirement = data['user_requirement']
+        user_requirement = request_data.user_requirement
         
         # IMPORTANT: Expire all cached objects to ensure we get fresh data from database
         # This prevents issues when multiple refine operations are called in sequence
@@ -781,8 +774,8 @@ async def refine_outline(project_id: str, request: Request):
         project_context = ProjectContext(project.to_dict(), reference_files_content)
         
         # Get previous requirements and language from request
-        previous_requirements = data.get('previous_requirements', [])
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        previous_requirements = request_data.previous_requirements or []
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
         
         # Refine outline
         logger.info(f"开始修改大纲: 项目 {project_id}, 用户要求: {user_requirement}, 历史要求数: {len(previous_requirements)}")
@@ -883,7 +876,7 @@ async def refine_outline(project_id: str, request: Request):
 
 
 @project_router.post('/{project_id}/refine/descriptions')
-async def refine_descriptions(project_id: str, request: Request):
+async def refine_descriptions(project_id: str, request_data: RefineDescriptionsRequest):
     """
     Refine page descriptions based on user requirements
     
@@ -899,12 +892,11 @@ async def refine_descriptions(project_id: str, request: Request):
         if not project:
             return not_found('Project')
         
-        data = await request.json()
-        
-        if not data or not data.get('user_requirement'):
+
+        if not request_data.user_requirement:
             return bad_request("user_requirement is required")
         
-        user_requirement = data['user_requirement']
+        user_requirement = request_data.user_requirement
         
         db.expire_all()
         
@@ -950,8 +942,8 @@ async def refine_descriptions(project_id: str, request: Request):
         project_context = ProjectContext(project.to_dict(), reference_files_content)
         
         # Get previous requirements and language from request
-        previous_requirements = data.get('previous_requirements', [])
-        language = data.get('language', os.getenv('OUTPUT_LANGUAGE', 'zh'))
+        previous_requirements = request_data.previous_requirements or []
+        language = request_data.language or os.getenv('OUTPUT_LANGUAGE', 'zh')
         
         # Refine descriptions
         logger.info(f"开始修改页面描述: 项目 {project_id}, 用户要求: {user_requirement}, 历史要も数: {len(previous_requirements)}")
@@ -1001,7 +993,6 @@ async def refine_descriptions(project_id: str, request: Request):
             'pages': [page.to_dict() for page in pages],
             'message': '页面描述修改成功'
         })
-    
     except Exception as e:
         db.rollback()
         logger.error(f"refine_descriptions failed: {str(e)}", exc_info=True)

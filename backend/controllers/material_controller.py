@@ -4,6 +4,7 @@ Material Controller - handles standalone material image generation
 from fastapi import APIRouter, Request, UploadFile, File
 from models import db, Project, Material, Task
 from utils import success_response, error_response, not_found, bad_request
+from models.request_models import AssociateMaterialsRequest
 from services import AIService, FileService
 from services.task_manager import task_manager, generate_material_image_task
 from pathlib import Path

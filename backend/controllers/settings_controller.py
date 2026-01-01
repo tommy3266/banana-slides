@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Request
 from models import db, Settings
 from utils import success_response, error_response, bad_request
+from models.request_models import UpdateSettingsRequest
 from datetime import datetime, timezone
 from config import Config
 import os
@@ -31,7 +32,7 @@ async def get_settings():
 
 
 @settings_router.put("/")
-async def update_settings(request: Request):
+async def update_settings(request_data: UpdateSettingsRequest):
     """
     Update application settings
 
@@ -44,22 +45,18 @@ async def update_settings(request: Request):
         }
     """
     try:
-        data = await request.json()
-        if not data:
-            return bad_request("Request body is required")
-
         settings = Settings.get_settings()
 
         # Update AI provider format configuration
-        if "ai_provider_format" in data:
-            provider_format = data["ai_provider_format"]
+        if request_data.ai_provider_format is not None:
+            provider_format = request_data.ai_provider_format
             if provider_format not in ["openai", "gemini"]:
                 return bad_request("AI provider format must be 'openai' or 'gemini'")
             settings.ai_provider_format = provider_format
 
         # Update API configuration
-        if "api_base_url" in data:
-            raw_base_url = data["api_base_url"]
+        if request_data.api_base_url is not None:
+            raw_base_url = request_data.api_base_url
             # Empty string from frontend means "clear override, fall back to env/default"
             if raw_base_url is None:
                 settings.api_base_url = None
@@ -67,31 +64,31 @@ async def update_settings(request: Request):
                 value = str(raw_base_url).strip()
                 settings.api_base_url = value if value != "" else None
 
-        if "api_key" in data:
-            settings.api_key = data["api_key"]
+        if request_data.api_key is not None:
+            settings.api_key = request_data.api_key
 
         # Update image generation configuration
-        if "image_resolution" in data:
-            resolution = data["image_resolution"]
+        if request_data.image_resolution is not None:
+            resolution = request_data.image_resolution
             if resolution not in ["1K", "2K", "4K"]:
                 return bad_request("Resolution must be 1K, 2K, or 4K")
             settings.image_resolution = resolution
 
-        if "image_aspect_ratio" in data:
-            aspect_ratio = data["image_aspect_ratio"]
+        if request_data.image_aspect_ratio is not None:
+            aspect_ratio = request_data.image_aspect_ratio
             settings.image_aspect_ratio = aspect_ratio
 
         # Update worker configuration
-        if "max_description_workers" in data:
-            workers = int(data["max_description_workers"])
+        if request_data.max_description_workers is not None:
+            workers = int(request_data.max_description_workers)
             if workers < 1 or workers > 20:
                 return bad_request(
                     "Max description workers must be between 1 and 20"
                 )
             settings.max_description_workers = workers
 
-        if "max_image_workers" in data:
-            workers = int(data["max_image_workers"])
+        if request_data.max_image_workers is not None:
+            workers = int(request_data.max_image_workers)
             if workers < 1 or workers > 20:
                 return bad_request(
                     "Max image workers must be between 1 and 20"
@@ -99,23 +96,23 @@ async def update_settings(request: Request):
             settings.max_image_workers = workers
 
         # Update model & MinerU configuration (optional, empty values fall back to Config)
-        if "text_model" in data:
-            settings.text_model = (data["text_model"] or "").strip() or None
+        if request_data.text_model is not None:
+            settings.text_model = (request_data.text_model or "").strip() or None
 
-        if "image_model" in data:
-            settings.image_model = (data["image_model"] or "").strip() or None
+        if request_data.image_model is not None:
+            settings.image_model = (request_data.image_model or "").strip() or None
 
-        if "mineru_api_base" in data:
-            settings.mineru_api_base = (data["mineru_api_base"] or "").strip() or None
+        if request_data.mineru_api_base is not None:
+            settings.mineru_api_base = (request_data.mineru_api_base or "").strip() or None
 
-        if "mineru_token" in data:
-            settings.mineru_token = data["mineru_token"]
+        if request_data.mineru_token is not None:
+            settings.mineru_token = request_data.mineru_token
 
-        if "image_caption_model" in data:
-            settings.image_caption_model = (data["image_caption_model"] or "").strip() or None
+        if request_data.image_caption_model is not None:
+            settings.image_caption_model = (request_data.image_caption_model or "").strip() or None
 
-        if "output_language" in data:
-            language = data["output_language"]
+        if request_data.output_language is not None:
+            language = request_data.output_language
             if language in ["zh", "en", "ja", "auto"]:
                 settings.output_language = language
             else:

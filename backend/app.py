@@ -26,9 +26,6 @@ from controllers.reference_file_controller import reference_file_bp
 from controllers.settings_controller import settings_bp
 from controllers import project_bp, page_bp, template_bp, user_template_bp, export_bp, file_bp
 
-# 导入 flask-restx
-from flask_restx import Api
-
 # Enable SQLite WAL mode for all connections
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_conn, connection_record):
@@ -108,16 +105,6 @@ def create_app():
             'name': 'Authorization'
         }
     }
-    
-    api = Api(
-        app,
-        version='1.0',
-        title='Banana Slides API',
-        description='AI-powered PPT generation service API documentation',
-        doc='/api-docs/',  # Swagger UI访问路径
-        authorizations=authorizations,
-        security='apikey'
-    )
     
     # Register blueprints
     app.register_blueprint(project_bp)
