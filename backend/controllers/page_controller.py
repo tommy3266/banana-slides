@@ -526,11 +526,12 @@ async def edit_page_image(project_id: str, page_id: str, request_data: EditPageI
         additional_ref_images = []
         
         # 1. Add template image if requested
-        context_images = data.get('context_images', {})
+        # context_images = data.get('context_images', {})
+        context_images = data.context_images
         if isinstance(context_images, dict):
             use_template = context_images.get('use_template', False)
         else:
-            use_template = data.get('use_template', False)
+            use_template = data.use_template
         
         if use_template:
             template_path = file_service.get_template_path(project_id)
@@ -571,7 +572,8 @@ async def edit_page_image(project_id: str, page_id: str, request_data: EditPageI
             edit_page_image_task,
             project_id,
             page_id,
-            data['edit_instruction'],
+            # data['edit_instruction'],
+            data.edit_instruction,
             ai_service,
             file_service,
             os.getenv('DEFAULT_ASPECT_RATIO', '16:9'),
