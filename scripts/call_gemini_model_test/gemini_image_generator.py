@@ -183,4 +183,5 @@ def main():
 
 
 if __name__ == "__main__":
+    # python .\gemini_image_generator.py --prompt "生成一个小马"
     main()
